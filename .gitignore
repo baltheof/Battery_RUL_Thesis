@@ -1,0 +1,9 @@
+# Αγνόησε τα μεγάλα αρχεία δεδομένων
+data/raw/
+data/processed/
+
+# Αγνόησε αρχεία της Python
+__pycache__/
+*.pyc
+.venv/
+.env
