@@ -3,38 +3,38 @@ from db_connection import get_engine
 
 def load_battery_metadata():
     
-    # 1. we take the connection from previous file
+    # 1. Get database connection- previous file
     engine = get_engine()
     if engine is None:
         return
     
-    # 2. file metadata.csv
+    # 2. Define file path
     file_path = r'C:/Users/balth/Desktop/Battery_RUL_Thesis/data/cleaned_dataset/metadata.csv'
 
     try:
-        # Reading the file
+        # Read CSV into DataFrame
         df = pd.read_csv(file_path)
 
-        # 1. Κρατάμε ΜΟΝΟ τις στήλες που θέλουμε
-        # 2. Χρησιμοποιούμε το drop_duplicates για να μείνει κάθε Battery_ID ΜΙΑ φορά
-        battery_data = df[['battery_id', 'Capacity']].drop_duplicates(subset=['battery_id']).copy()
+        # Filter for 'discharge' cycles only
+        discharge_only_df = df[df['type'] == 'discharge']
+
+        # Keep specific columns and get the first discharge capacity per battery
+        battery_data = discharge_only_df [['battery_id','Capacity']].drop_duplicates(subset=['battery_id']).copy()
         
-        # 3. Φιλτράρουμε τυχόν κενές τιμές (αν υπάρχουν)
+        #Drop rows with missing battery IDs
         battery_data = battery_data.dropna(subset=['battery_id'])
 
+        # Add source dataset and rename columns to match SQL schema
         battery_data['Source_Dataset'] = 'NASA'
         battery_data.columns = ['Battery_ID', 'Nominal_Capacity', 'Source_Dataset']
 
-        # 4. Ανέβασμα στην SQL
-        battery_data.to_sql('BATTERIES', con=engine, if_exists='append', index=False)
-
-        # 3. Ανέβασμα στην SQL
+        # Load data into SQL database
         battery_data.to_sql('BATTERIES', con=engine, if_exists='append', index=False)
 
         print(" The battery data have been succesfully loaded into the SQL Database")
 
     except Exception as e :
-        # Αν το σφάλμα είναι "Duplicate Key", σημαίνει ότι οι μπαταρίες είναι ήδη μέσα
+        #Handle Primary Key violation if data already exists
         if "Violation of PRIMARY KEY" in str(e):
             print("battery data are already in the sql database")
         else:
