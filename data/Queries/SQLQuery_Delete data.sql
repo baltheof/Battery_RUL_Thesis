@@ -1,0 +1,6 @@
+USE BATTERY_DB;
+
+-- Σβήνει τα δεδομένα αλλά κρατάει τους πίνακες
+DELETE FROM MEASUREMENTS;
+DELETE FROM TEST_CYCLES;
+DELETE FROM BATTERIES;

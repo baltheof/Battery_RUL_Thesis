@@ -1,6 +1,9 @@
 import pandas as pd
 from db_connection import get_engine
 
+
+#-----------DATA LOADING - BRANCH ------------
+
 def load_battery_metadata():
     
     # 1. Get database connection- previous file
@@ -42,3 +45,53 @@ def load_battery_metadata():
 
 if __name__ == "__main__":
     load_battery_metadata()
+
+#--------------------------------------------------
+
+
+#----------LOAD TEST CYCLES - BRANCH --------------
+
+def load_test_cycles():
+    engine = get_engine()
+    if engine is None: return
+
+    file_path = r'C:/Users/balth/Desktop/Battery_RUL_Thesis/data/cleaned_dataset/metadata.csv'
+
+    try:
+        df = pd.read_csv(file_path)
+
+        # 1. Επιλογή στηλών
+        cycles_data = df[['battery_id', 'test_id', 'type', 'Capacity']].copy()
+        cycles_data.columns = ['Battery_ID', 'Cycle_Index', 'Operation_Type', 'Capacity_Ah']
+
+        # 2. ΕΞΑΝΑΓΚΑΣΜΟΣ ΤΥΠΩΝ (Το κλειδί για τη λύση του σφάλματος 8114)
+        # Μετατρέπουμε το Capacity_Ah σε float και το Cycle_Index σε int
+        cycles_data['Capacity_Ah'] = pd.to_numeric(cycles_data['Capacity_Ah'], errors='coerce')
+        cycles_data['Cycle_Index'] = pd.to_numeric(cycles_data['Cycle_Index'], errors='coerce').astype('Int64')
+
+        # 3. Καθαρισμός: Αφαιρούμε γραμμές που έγιναν NaN (π.χ. αν υπήρχε κείμενο αντί για νούμερο)
+        cycles_data = cycles_data.dropna(subset=['Battery_ID', 'Capacity_Ah', 'Cycle_Index'])
+
+        # 4. Φόρτωση στην SQL
+        cycles_data.to_sql(
+            'TEST_CYCLES', 
+            con=engine, 
+            if_exists='append', 
+            index=False, 
+            chunksize=100 
+        )
+
+        print(f" Success: {len(cycles_data)} rows loaded into TEST_CYCLES!")
+
+    except Exception as e:
+        # Χρησιμοποιούμε μόνο το 'e' εδώ για να αποφύγουμε το NameError
+        print(f" LOADING ERROR: {e}")
+
+if __name__ == "__main__":
+    # 1. Πρώτα ελέγχουμε/φορτώνουμε τις μπαταρίες
+    load_battery_metadata()
+    
+    # 2. ΜΕΤΑ φορτώνουμε τους κύκλους (ΠΡΟΣΕΞΕ ΝΑ ΜΗΝ ΕΙΝΑΙ ΣΕ ΣΧΟΛΙΟ #)
+    load_test_cycles()
+
+# --------------------------------------------------

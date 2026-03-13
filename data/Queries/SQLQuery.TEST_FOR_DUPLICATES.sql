@@ -1,0 +1,4 @@
+SELECT Battery_ID, count(*)
+FROM BATTERIES
+GROUP BY Battery_ID
+HAVING COUNT (*) >1;
