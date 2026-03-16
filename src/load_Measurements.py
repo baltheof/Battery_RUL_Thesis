@@ -1,70 +1,69 @@
 import os
-import glob
 import pandas as pd
-from db_connection import get_engine # Βάλε το σωστό όνομα αν διαφέρει
-
-def load_Measurements():
+from db_connection import get_engine 
+def load_Measurements_Correctly():
     engine = get_engine()
     if engine is None: return
 
-    # 1. Path για τον ΦΑΚΕΛΟ με τα Raw δεδομένα 
+    # 1. Διαβάζουμε το "Λεξικό"
+    metadata_path = r'C:/Users/balth/Desktop/Battery_RUL_Thesis/data/cleaned_dataset/metadata.csv' 
+    metadata_df = pd.read_csv(metadata_path)
+
+    # 2. Κρατάμε ΑΥΣΤΗΡΑ μόνο τις αποφορτίσεις (discharges)
+    discharges_df = metadata_df[metadata_df['type'] == 'discharge'].copy()
+
+    # 3. Κατεβάζουμε τα σωστά ID από τη βάση δεδομένων
+    sql_query = "SELECT Cycle_ID, Battery_ID, Cycle_Index FROM TEST_CYCLES"
+    test_cycles_df = pd.read_sql(sql_query, engine)
+
+    # 4. Παντρεύουμε (Merge) το Λεξικό με τη βάση
+    # Τώρα ξέρουμε ΑΚΡΙΒΩΣ ποιο filename πάει σε ποιο Cycle_ID!
+    mapping_df = pd.merge(
+        discharges_df,
+        test_cycles_df,
+        left_on=['battery_id', 'test_id'],
+        right_on=['Battery_ID', 'Cycle_Index']
+    )
+
+    # Ο φάκελος με τα μικρά CSV
     raw_folder_path = r'C:/Users/balth/Desktop/Battery_RUL_Thesis/data/cleaned_dataset/data/raw'
 
-    # Μαζεύουμε όλα τα αρχεία που τελειώνουν σε .csv
-    all_csv_files = glob.glob(os.path.join(raw_folder_path, "*.csv"))
+    print(f"Found exactly {len(mapping_df)} discharge files! Starting the loading process...")
 
-    if not all_csv_files:
-        print("Not found csv in this directory..")
-        return
-    
-    print(f"📂 Found {len(all_csv_files)} files to load. Starting the process...")
-
-    # 2. ΕΝΑΡΞΗ ΤΗΣ ΛΟΥΠΑΣ
-    for file_path in all_csv_files:
-        file_name = os.path.basename(file_path)
-        print(f"⏳ Processing and loading file: {file_name}...")
+    # 5. Η Λούπα φόρτωσης
+    for index, row in mapping_df.iterrows():
+        file_name = row['filename']
+        cycle_id = row['Cycle_ID']
+        
+        file_path = os.path.join(raw_folder_path, file_name)
+        
+        print(f" Reading {file_name} (maps to Cycle_ID {cycle_id})...")
 
         try:
-            # --- Η ΜΑΓΕΙΑ ΣΥΜΒΑΙΝΕΙ ΕΔΩ ---
-            # Εξαγωγή του Cycle_ID από το όνομα (π.χ. '07062.csv' -> 7062)
-            cycle_id = int(file_name.replace('.csv', ''))
-
-            # Διαβάζουμε το μικρό αρχείο CSV
+            # Διαβάζουμε το μικρό CSV
             raw_df = pd.read_csv(file_path)
 
-            # ΑΣΦΑΛΕΙΑ: Αν το CSV είναι άδειο
             if len(raw_df) == 0:
-                print(f"  -> ⚠️ Το αρχείο είναι άδειο. Προσπέραση...")
                 continue
 
-            # Προσθέτουμε χειροκίνητα τη στήλη Cycle_ID σε όλες τις γραμμές του αρχείου!
+            # Του κολλάμε το ΑΠΟΛΥΤΑ ΣΩΣΤΟ Cycle_ID
             raw_df['Cycle_ID'] = cycle_id
-            # -------------------------------
 
-            # 3. Επιλογή και Μετονομασία στηλών (Ακριβώς όπως στο Excel σου)
+            # Μετονομασία στηλών για την SQL
             upload_df = raw_df[[
-                'Cycle_ID',
-                'Voltage_measured', 
-                'Current_measured', 
-                'Temperature_measured', 
-                'Time'
+                'Cycle_ID', 'Voltage_measured', 'Current_measured', 'Temperature_measured', 'Time'
             ]].copy()
 
             upload_df.columns = [
-                'Cycle_ID', 
-                'Voltage_Measured', 
-                'Current_Measured', 
-                'Temperature_Measure', 
-                'Time_Seconds'
+                'Cycle_ID', 'Voltage_Measured', 'Current_Measured', 'Temperature_Measure', 'Time_Seconds'
             ]
 
-            # 4. Φόρτωση στην SQL
+            # Ανέβασμα στη βάση
             upload_df.to_sql('MEASUREMENTS', con=engine, if_exists='append', index=False, chunksize=500)
-            print(f"  -> ✅ Success: {file_name} loaded into Cycle_ID {cycle_id}!")
+            print(f"  Uploaded successfully!")
 
         except Exception as e:
-            # Πιάνει τα λάθη για το μεμονωμένο αρχείο και συνεχίζει
-            print(f"  -> ❌ ERROR IN {file_name} : {e}")
+            print(f"  ERROR IN FILE {file_name} : {e}")
 
 if __name__ == "__main__":
-    load_Measurements()
+    load_Measurements_Correctly()
