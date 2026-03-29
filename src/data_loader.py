@@ -2,7 +2,7 @@ import pandas as pd
 from db_connection import get_engine
 
 
-#-----------DATA LOADING - BRANCH ------------
+#---------- DATA LOADING - BRANCH ------------
 
 def load_battery_metadata():
     
@@ -52,27 +52,31 @@ if __name__ == "__main__":
 #----------LOAD TEST CYCLES - BRANCH --------------
 
 def load_test_cycles():
+
+    # Initialize database connection
     engine = get_engine()
-    if engine is None: return
+    if engine is None: return #stop the compile
 
     file_path = r'C:/Users/balth/Desktop/Battery_RUL_Thesis/data/cleaned_dataset/metadata.csv'
 
     try:
+        # Load the CSV file into a DataFrame
         df = pd.read_csv(file_path)
 
-        # 1. Επιλογή στηλών
+       # 1. Select specific columns and rename them to match the SQL schema
         cycles_data = df[['battery_id', 'test_id', 'type', 'Capacity']].copy()
         cycles_data.columns = ['Battery_ID', 'Cycle_Index', 'Operation_Type', 'Capacity_Ah']
 
-        # 2. ΕΞΑΝΑΓΚΑΣΜΟΣ ΤΥΠΩΝ (Το κλειδί για τη λύση του σφάλματος 8114)
-        # Μετατρέπουμε το Capacity_Ah σε float και το Cycle_Index σε int
+        # 2. DATA TYPE CONVERSION (Fixes SQL Error 8114)
+        # Force conversion of capacity to float and index to integer
         cycles_data['Capacity_Ah'] = pd.to_numeric(cycles_data['Capacity_Ah'], errors='coerce')
         cycles_data['Cycle_Index'] = pd.to_numeric(cycles_data['Cycle_Index'], errors='coerce').astype('Int64')
 
-        # 3. Καθαρισμός: Αφαιρούμε γραμμές που έγιναν NaN (π.χ. αν υπήρχε κείμενο αντί για νούμερο)
+        # 3. CLEANING: Remove any rows that became NaN during conversion
         cycles_data = cycles_data.dropna(subset=['Battery_ID', 'Capacity_Ah', 'Cycle_Index'])
 
-        # 4. Φόρτωση στην SQL
+        # 4. UPLOAD TO SQL DATABASE
+        # Use chunksize to avoid the 2100 parameter limit (Error gkpj)
         cycles_data.to_sql(
             'TEST_CYCLES', 
             con=engine, 
@@ -84,14 +88,16 @@ def load_test_cycles():
         print(f" Success: {len(cycles_data)} rows loaded into TEST_CYCLES!")
 
     except Exception as e:
-        # Χρησιμοποιούμε μόνο το 'e' εδώ για να αποφύγουμε το NameError
+       # Print error details for debugging
         print(f" LOADING ERROR: {e}")
 
 if __name__ == "__main__":
-    # 1. Πρώτα ελέγχουμε/φορτώνουμε τις μπαταρίες
+    # 1. First, we check/load the main battery profiles (Parent Table)
+    # This must run first to establish the Battery_IDs in the system.
     load_battery_metadata()
     
-    # 2. ΜΕΤΑ φορτώνουμε τους κύκλους (ΠΡΟΣΕΞΕ ΝΑ ΜΗΝ ΕΙΝΑΙ ΣΕ ΣΧΟΛΙΟ #)
+    # 2. THEN, we load the historical test cycles (Child Table)
+    # These records depend on the batteries existing in the database.
     load_test_cycles()
 
-# --------------------------------------------------
+# -------------------------------------------------
