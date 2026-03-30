@@ -3,12 +3,13 @@ import numpy as np
 from sqlalchemy import text
 from db_connection import get_engine
 
-def clean_consecutive_outliers():
+def fix_only_zeros():
     engine = get_engine()
     if engine is None: 
         return
 
     print("Fetching discharge cycles from database...")
+    # Loading only discharge cycles to process the zeros
     query = """
         SELECT Cycle_ID, Battery_ID, Cycle_Index, Capacity_Ah 
         FROM TEST_CYCLES 
@@ -17,34 +18,36 @@ def clean_consecutive_outliers():
     """
     df = pd.read_sql(query, engine)
 
-    # 1. Keep original values to compare later
-    original_capacities = df['Capacity_Ah'].copy()
-
-    print("Identifying bad values (< 0.8 Ah) and applying Pandas Interpolation...")
+    # 1. Identity Check: Find exactly where Capacity is 0
+    # We create a mask for values that are exactly 0
+    zeros_mask = (df['Capacity_Ah'] == 0)
     
-    # 2. Identify Anomalies: Turn ALL values below 0.8 Ah into NaN (empty)
-    # This catches blocks of continuous errors (like 0.057)
-    df.loc[df['Capacity_Ah'] < 0.8, 'Capacity_Ah'] = np.nan
+    num_zeros = zeros_mask.sum()
+    print(f"Found {num_zeros} absolute zero values.")
 
-    # 3. Interpolation: Pandas fills the gaps smoothly across each battery
-    df['Capacity_Ah'] = df.groupby('Battery_ID')['Capacity_Ah'].transform(lambda x: x.interpolate(method='linear'))
-    
-    # Optional: If the very first or last row of a battery was NaN, fill it
-    df['Capacity_Ah'] = df.groupby('Battery_ID')['Capacity_Ah'].transform(lambda x: x.ffill().bfill())
-
-    # 4. Find exactly which rows were modified
-    changed_rows = df[df['Capacity_Ah'] != original_capacities].dropna(subset=['Capacity_Ah'])
-    issues_found = len(changed_rows)
-    
-    print(f"Found {issues_found} anomalous consecutive values. Updating database safely...")
-
-    if issues_found == 0:
-        print("No anomalies found. Database is clean!")
+    if num_zeros == 0:
+        print("No zero values found. Database is already consistent with Excel.")
         return
 
-    # 5. Database Update: Update ONLY the specific rows that were fixed
+    # 2. Preparation for Interpolation
+    # We replace ONLY the zeros with NaN so Pandas can fill them
+    df.loc[zeros_mask, 'Capacity_Ah'] = np.nan
+
+    print("Applying Linear Interpolation for zero values...")
+    # Group by battery to ensure we don't mix data between different batteries
+    df['Capacity_Ah'] = df.groupby('Battery_ID')['Capacity_Ah'].transform(lambda x: x.interpolate(method='linear'))
+    
+    # Handle cases where a zero might be at the very start or end
+    df['Capacity_Ah'] = df.groupby('Battery_ID')['Capacity_Ah'].transform(lambda x: x.ffill().bfill())
+
+    # 3. Targeted Database Update
+    # We only want to update the rows that were originally 0
+    to_update = df[zeros_mask].copy()
+
+    print(f"Updating {len(to_update)} records in the database...")
+    
     with engine.begin() as conn:
-        for _, row in changed_rows.iterrows():
+        for _, row in to_update.iterrows():
             stmt = text("""
                 UPDATE TEST_CYCLES 
                 SET Capacity_Ah = :cap 
@@ -52,7 +55,7 @@ def clean_consecutive_outliers():
             """)
             conn.execute(stmt, {"cap": row['Capacity_Ah'], "cid": row['Cycle_ID']})
 
-    print("Correction of consecutive anomalies completed successfully!")
+    print("Strict cleanup completed successfully! Only zero values were modified.")
 
 if __name__ == "__main__":
-    clean_consecutive_outliers()
+    fix_only_zeros()
