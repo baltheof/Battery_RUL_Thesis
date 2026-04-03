@@ -97,7 +97,7 @@ if __name__ == "__main__":
     load_battery_metadata()
     
     # 2. THEN, we load the historical test cycles (Child Table)
-    # These records depend on the batteries existing in the database.
+    # These records depend on the batteries existing in the database
     load_test_cycles()
 
-# -------------------------------------------------
+# ------------------------------------------------
