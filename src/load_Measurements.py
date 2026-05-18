@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 from db_connection import get_engine 
+
 def load_Measurements_Correctly():
     engine = get_engine()
     if engine is None: return
@@ -12,16 +13,23 @@ def load_Measurements_Correctly():
     # 2. Κρατάμε ΑΥΣΤΗΡΑ μόνο τις αποφορτίσεις (discharges)
     discharges_df = metadata_df[metadata_df['type'] == 'discharge'].copy()
 
+    # --- Η ΜΑΓΙΚΗ ΔΙΟΡΘΩΣΗ ---
+    # Επειδή στη βάση κάναμε τα Cycle_Index να είναι 1, 2, 3...
+    # Φτιάχνουμε έναν αντίστοιχο μετρητή (Match_Index) στο Λεξικό για να ταιριάξουν απόλυτα!
+    discharges_df = discharges_df.sort_values(['battery_id', 'test_id'])
+    discharges_df['Match_Index'] = discharges_df.groupby('battery_id').cumcount() + 1
+    # -------------------------
+
     # 3. Κατεβάζουμε τα σωστά ID από τη βάση δεδομένων
     sql_query = "SELECT Cycle_ID, Battery_ID, Cycle_Index FROM TEST_CYCLES"
     test_cycles_df = pd.read_sql(sql_query, engine)
 
     # 4. Παντρεύουμε (Merge) το Λεξικό με τη βάση
-    # Τώρα ξέρουμε ΑΚΡΙΒΩΣ ποιο filename πάει σε ποιο Cycle_ID!
+    # Τώρα παντρεύουμε το νέο Match_Index (1, 2, 3...) με το Cycle_Index της βάσης (1, 2, 3...)!
     mapping_df = pd.merge(
         discharges_df,
         test_cycles_df,
-        left_on=['battery_id', 'test_id'],
+        left_on=['battery_id', 'Match_Index'],  # Προσοχή: Αλλάξαμε το test_id σε Match_Index
         right_on=['Battery_ID', 'Cycle_Index']
     )
 
