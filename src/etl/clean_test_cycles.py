@@ -2,6 +2,10 @@ import pandas as pd
 import numpy as np
 from sqlalchemy import text
 from db_connection import get_engine
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 
 def fix_only_zeros():
     engine = get_engine()

@@ -4,6 +4,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import mplcursors
 from matplotlib.widgets import TextBox
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from db_connection import get_engine
 
 # Route configuration
 current_dir = os.path.dirname(os.path.abspath(__file__))

@@ -1,6 +1,7 @@
+import sys
 import os
-import pandas as pd
-from db_connection import get_engine 
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from db_connection import get_engine
 
 def load_Measurements_Correctly():
     engine = get_engine()
