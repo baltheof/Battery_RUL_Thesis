@@ -1,10 +1,10 @@
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pandas as pd
 import numpy as np
 from sqlalchemy import text
 from db_connection import get_engine
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 FAILURE_THRESHOLD_RATIO = 0.70
 
@@ -29,7 +29,10 @@ def extract_features():
     # ── Step 2: Compute RUL per battery ──────────────────────────────────────
     print("Step 2/4: Computing RUL for each cycle...")
 
-    def compute_rul(group):
+    rul_list = []
+    # Χωρίζουμε τα δεδομένα ανά μπαταρία με απόλυτη ασφάλεια (For Loop)
+    for battery_id, group in cycles_df.groupby('Battery_ID'):
+        group = group.copy() # Αποτροπή warnings
         threshold = group['Nominal_Capacity'].iloc[0] * FAILURE_THRESHOLD_RATIO
         failed = group[group['Capacity_Ah'] < threshold]
 
@@ -41,10 +44,11 @@ def extract_features():
             group['RUL'] = failure_cycle - group['Cycle_Index']
             # Cycles after failure get RUL = 0
             group['RUL'] = group['RUL'].clip(lower=0)
+            
+        rul_list.append(group)
 
-        return group
-
-    cycles_df = cycles_df.groupby('Battery_ID', group_keys=False).apply(compute_rul).reset_index(drop=True)
+    # Ενώνουμε ξανά τα κομμάτια - Καμία στήλη δεν χάνεται!
+    cycles_df = pd.concat(rul_list, ignore_index=True)
 
     # Drop cycles with undefined RUL (batteries that never reached failure)
     before = len(cycles_df)
@@ -82,9 +86,9 @@ def extract_features():
     final_df = cycles_df.merge(features_df, on='Cycle_ID', how='inner')
     print("Columns after merge:", final_df.columns.tolist())  # προσωρινό debug
 
-    # Keep only the columns needed for ML
+    # Keep only the columns needed for ML (ΠΡΟΣΤΕΘΗΚΕ ΤΟ Battery_ID ΕΔΩ)
     final_df = final_df[[
-    'Cycle_ID', 'Cycle_Index', 'Capacity_Ah',
+    'Cycle_ID', 'Battery_ID', 'Cycle_Index', 'Capacity_Ah',
     'Discharge_Time', 'Temp_Mean', 'Temp_Max',
     'Voltage_Min', 'Voltage_Mean', 'Current_Mean',
     'RUL'
@@ -94,7 +98,6 @@ def extract_features():
 
     print(f"   Final dataset: {len(final_df)} rows, {final_df.shape[1]} columns.")
     print(f"   RUL range: {final_df['RUL'].min()} – {final_df['RUL'].max()} cycles")
-
 
     # Upload to SQL
     final_df.to_sql(
