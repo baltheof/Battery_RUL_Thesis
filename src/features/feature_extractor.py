@@ -47,7 +47,7 @@ def extract_features():
             
         rul_list.append(group)
 
-    # Ενώνουμε ξανά τα κομμάτια - Καμία στήλη δεν χάνεται!
+    # Ενώνουμε ξανά τα κομμάτια - Καμία στήλη δεν χάνεται
     cycles_df = pd.concat(rul_list, ignore_index=True)
 
     # Drop cycles with undefined RUL (batteries that never reached failure)
@@ -74,7 +74,7 @@ def extract_features():
                AVG(Voltage_Measured)       AS Voltage_Mean,
                AVG(Current_Measured)       AS Current_Mean
         FROM MEASUREMENTS
-        WHERE Cycle_ID IN ({ids_str})
+        WHERE Cycle_ID IN ({ids_str}) AND Current_Measured < -0.1
         GROUP BY Cycle_ID
     """
     features_df = pd.read_sql(meas_query, engine)
@@ -84,7 +84,6 @@ def extract_features():
     print("Step 4/4: Merging and uploading to CYCLE_FEATURES...")
 
     final_df = cycles_df.merge(features_df, on='Cycle_ID', how='inner')
-    print("Columns after merge:", final_df.columns.tolist())  # προσωρινό debug
 
     # Keep only the columns needed for ML (ΠΡΟΣΤΕΘΗΚΕ ΤΟ Battery_ID ΕΔΩ)
     final_df = final_df[[
@@ -108,7 +107,7 @@ def extract_features():
         chunksize=200
     )
     print("\nFeature extraction complete! Table CYCLE_FEATURES is ready.")
-    print(final_df.head(10).to_string(index=False))
+    # print(final_df.head(10).to_string(index=False))
 
 if __name__ == "__main__":
     extract_features()
