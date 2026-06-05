@@ -1,3 +1,4 @@
 {
-    "python.REPL.enableREPLSmartSend": false
+    "python.defaultInterpreterPath": "c:\\Users\\balth\\Desktop\\Battery_RUL_Thesis\\.venv\\Scripts\\python.exe",
+    "python.terminal.activateEnvironment": true
 }

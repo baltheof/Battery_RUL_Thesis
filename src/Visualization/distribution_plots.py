@@ -23,9 +23,7 @@ def plot_distributions():
         'Voltage_Min', 'Voltage_Mean', 'Current_Mean'
     ]
 
-    # =========================================================
     # PLOT 1: STATIC HISTOGRAMS
-    # =========================================================
     fig, axes = plt.subplots(2, 4, figsize=(20, 10), constrained_layout=True)
     axes = axes.flatten()
 
@@ -46,9 +44,8 @@ def plot_distributions():
     
     plt.show()
 
-    # =========================================================
+  
     # PLOT 2: INTERACTIVE CAPACITY DEGRADATION
-    # =========================================================
     fig2, ax2 = plt.subplots(figsize=(14, 7), constrained_layout=True)
     batteries = df['Battery_ID'].unique()
     colors = sns.color_palette("husl", len(batteries)) 
@@ -96,7 +93,7 @@ def plot_distributions():
 
     fig2.canvas.mpl_connect('pick_event', on_pick)
 
-    # --- HOVER DYNAMIC COLOR ---
+    #  HOVER DYNAMIC COLOR 
     cursor = mplcursors.cursor(lines, hover=True)
     @cursor.connect("add")
     def on_add(sel):
