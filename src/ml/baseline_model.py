@@ -75,7 +75,7 @@ def train_baseline_model():
     for feature, coef in zip(feature_cols, coeffs[1:]):
         print(f"   {feature:20s}: {coef:.4f}")
 
-    # ── Plot ──────────────────────────────────────────────────────────────────
+    # ── Plot ────────────────────────────────────────────────────────────────
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
     axes[0].scatter(y_test, y_pred, alpha=0.5, color='steelblue',
