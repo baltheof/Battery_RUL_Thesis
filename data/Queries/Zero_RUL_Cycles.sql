@@ -1,0 +1,7 @@
+SELECT
+    Battery_ID,
+    COUNT(*) AS Zero_RUL_Cycles
+FROM CYCLE_FEATURES
+WHERE RUL = 0
+GROUP BY Battery_ID
+ORDER BY Zero_RUL_Cycles DESC;
