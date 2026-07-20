@@ -5,20 +5,22 @@ Outputs
 -------
 dbo.CYCLE_FEATURES_ALL
     Diagnostic table containing every discharge cycle, extracted features,
-    the battery-specific failure threshold, the detected failure cycle,
-    eligibility flags, and exclusion reasons.
+    battery-specific threshold, detected failure cycle, eligibility flags,
+    and exclusion reasons.
 
 dbo.CYCLE_FEATURES
-    Model-ready table containing only cycles up to and including the detected
-    failure cycle, with at most one RUL = 0 row per eligible battery.
+    Model-ready table containing only valid cycles up to and including the
+    detected End-of-Life cycle, with at most one RUL = 0 row per battery.
 
-Methodological note
--------------------
-The failure cycle is defined as the beginning of the final continuous run in
-which Capacity_Ah remains below 70% of the battery's Nominal_Capacity. Earlier
-threshold crossings followed by recovery are flagged as temporary crossings
-and excluded from the model-ready table instead of being treated as permanent
-End of Life.
+RUL rule
+--------
+1. Capacity is smoothed with a centered rolling median.
+2. A possible failure starts when capacity stays below 70% of nominal
+   capacity for a minimum number of consecutive cycles.
+3. If a sustained recovery above the threshold appears later, that crossing
+   is treated as temporary and the search continues.
+4. The accepted failure cycle is the first cycle of the first confirmed
+   below-threshold run that is not followed by sustained recovery.
 """
 
 from __future__ import annotations
@@ -41,9 +43,24 @@ if str(SRC_DIR) not in sys.path:
 from db_connection import get_engine  # pylint: disable=wrong-import-position
 
 
+# ---------------------------------------------------------------------------
+# Methodological parameters
+# ---------------------------------------------------------------------------
 FAILURE_THRESHOLD_RATIO: Final[float] = 0.70
 ACTIVE_CURRENT_THRESHOLD_A: Final[float] = -0.1
 MIN_ACTIVE_MEASUREMENTS: Final[int] = 2
+
+# Rolling median used only for End-of-Life detection.
+SMOOTHING_WINDOW_CYCLES: Final[int] = 3
+
+# A failure candidate requires at least this many consecutive cycles below
+# the threshold.
+MIN_CONSECUTIVE_BELOW: Final[int] = 3
+
+# A previous crossing is treated as temporary when at least this many
+# consecutive cycles later return to or above the threshold.
+MIN_CONSECUTIVE_RECOVERY_ABOVE: Final[int] = 5
+
 DATABASE_SCHEMA: Final[str] = "dbo"
 
 MODEL_FEATURE_COLUMNS: Final[list[str]] = [
@@ -72,6 +89,9 @@ MODEL_OUTPUT_COLUMNS: Final[list[str]] = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Data loading
+# ---------------------------------------------------------------------------
 def load_discharge_cycles(engine: Engine) -> pd.DataFrame:
     """Load every discharge cycle and its battery nominal capacity."""
     query = text(
@@ -110,7 +130,12 @@ def load_discharge_cycles(engine: Engine) -> pd.DataFrame:
             f"{duplicate_battery_cycles}."
         )
 
-    numeric_columns = ["Cycle_ID", "Cycle_Index", "Capacity_Ah", "Nominal_Capacity"]
+    numeric_columns = [
+        "Cycle_ID",
+        "Cycle_Index",
+        "Capacity_Ah",
+        "Nominal_Capacity",
+    ]
     for column in numeric_columns:
         cycles_df[column] = pd.to_numeric(cycles_df[column], errors="coerce")
 
@@ -172,21 +197,99 @@ def load_active_discharge_features(engine: Engine) -> pd.DataFrame:
         "Active_Measurement_Count",
     ]
     for column in numeric_columns:
-        features_df[column] = pd.to_numeric(features_df[column], errors="coerce")
+        features_df[column] = pd.to_numeric(
+            features_df[column],
+            errors="coerce",
+        )
 
     print(f"   Extracted active-discharge features for {len(features_df)} cycles.")
     return features_df
 
 
-def assign_rul_to_battery(group: pd.DataFrame) -> pd.DataFrame:
-    """
-    Detect persistent End of Life and calculate RUL for one battery.
+# ---------------------------------------------------------------------------
+# End-of-Life and RUL logic
+# ---------------------------------------------------------------------------
+def find_first_consecutive_run(
+    mask: np.ndarray,
+    run_length: int,
+    start_position: int = 0,
+) -> int | None:
+    """Return the first position where a consecutive True run begins."""
+    if run_length <= 0:
+        raise ValueError("run_length must be positive.")
 
-    Failure is the first cycle of the final continuous below-threshold run.
-    Earlier below-threshold runs followed by recovery are flagged and excluded.
+    consecutive_count = 0
+
+    for position in range(start_position, len(mask)):
+        if bool(mask[position]):
+            consecutive_count += 1
+        else:
+            consecutive_count = 0
+
+        if consecutive_count >= run_length:
+            return position - run_length + 1
+
+    return None
+
+
+def detect_confirmed_failure_position(
+    below_threshold: np.ndarray,
+    above_threshold: np.ndarray,
+) -> tuple[int | None, np.ndarray]:
     """
+    Detect a confirmed failure position.
+
+    A candidate requires MIN_CONSECUTIVE_BELOW consecutive cycles below the
+    threshold. If a later run of MIN_CONSECUTIVE_RECOVERY_ABOVE consecutive
+    cycles returns above the threshold, the candidate is temporary and the
+    search resumes after that recovery.
+
+    Returns
+    -------
+    tuple
+        failure_position or None, and a boolean mask marking temporary
+        below-threshold positions encountered before the accepted failure.
+    """
+    temporary_crossing_mask = np.zeros(len(below_threshold), dtype=bool)
+    search_start = 0
+
+    while search_start < len(below_threshold):
+        candidate_start = find_first_consecutive_run(
+            below_threshold,
+            MIN_CONSECUTIVE_BELOW,
+            start_position=search_start,
+        )
+
+        if candidate_start is None:
+            return None, temporary_crossing_mask
+
+        recovery_search_start = candidate_start + MIN_CONSECUTIVE_BELOW
+        recovery_start = find_first_consecutive_run(
+            above_threshold,
+            MIN_CONSECUTIVE_RECOVERY_ABOVE,
+            start_position=recovery_search_start,
+        )
+
+        if recovery_start is None:
+            # No sustained recovery was observed after this candidate.
+            return candidate_start, temporary_crossing_mask
+
+        # Mark only below-threshold points before the sustained recovery as
+        # temporary. The recovered region can still be used later.
+        temporary_crossing_mask[candidate_start:recovery_start] |= (
+            below_threshold[candidate_start:recovery_start]
+        )
+
+        search_start = recovery_start + MIN_CONSECUTIVE_RECOVERY_ABOVE
+
+    return None, temporary_crossing_mask
+
+
+def assign_rul_to_battery(group: pd.DataFrame) -> pd.DataFrame:
+    """Detect confirmed End of Life and calculate RUL for one battery."""
     group = group.sort_values("Cycle_Index").reset_index(drop=True).copy()
 
+    group["Capacity_Smoothed_Ah"] = np.nan
     group["Failure_Threshold_Ah"] = np.nan
     group["Failure_Cycle"] = pd.NA
     group["RUL"] = np.nan
@@ -204,32 +307,50 @@ def assign_rul_to_battery(group: pd.DataFrame) -> pd.DataFrame:
     group["Failure_Threshold_Ah"] = threshold
 
     valid_capacity = group["Capacity_Ah"].notna()
+
     if not valid_capacity.any():
         group["Exclusion_Reason"] = "MISSING_CAPACITY"
         return group
 
-    # A missing capacity interrupts continuity and cannot support EOL detection.
-    below_threshold = valid_capacity & group["Capacity_Ah"].lt(threshold)
+    # Centered rolling median reduces isolated capacity spikes. RUL labels are
+    # constructed offline from the full degradation history, so using adjacent
+    # cycles here is acceptable for target construction.
+    smoothed_capacity = group["Capacity_Ah"].rolling(
+        window=SMOOTHING_WINDOW_CYCLES,
+        center=True,
+        min_periods=1,
+    ).median()
 
-    valid_positions = np.flatnonzero(valid_capacity.to_numpy())
-    last_valid_position = int(valid_positions[-1])
+    # A missing raw capacity remains invalid even if neighbouring values would
+    # allow the rolling median to be calculated.
+    smoothed_capacity = smoothed_capacity.where(valid_capacity)
+    group["Capacity_Smoothed_Ah"] = smoothed_capacity
 
-    if not bool(below_threshold.iloc[last_valid_position]):
-        group["Exclusion_Reason"] = "NO_OBSERVED_PERSISTENT_FAILURE"
+    valid_smoothed = smoothed_capacity.notna()
+    below_threshold = valid_smoothed & smoothed_capacity.lt(threshold)
+    above_threshold = valid_smoothed & smoothed_capacity.ge(threshold)
+
+    failure_position, temporary_mask_array = detect_confirmed_failure_position(
+        below_threshold.to_numpy(dtype=bool),
+        above_threshold.to_numpy(dtype=bool),
+    )
+
+    temporary_crossing = pd.Series(
+        temporary_mask_array,
+        index=group.index,
+        dtype=bool,
+    )
+
+    if failure_position is None:
+        group.loc[temporary_crossing, "Exclusion_Reason"] = (
+            "TEMPORARY_THRESHOLD_CROSSING"
+        )
+        group.loc[
+            group["Exclusion_Reason"].eq(""),
+            "Exclusion_Reason",
+        ] = "NO_OBSERVED_CONFIRMED_FAILURE"
+        group.loc[~valid_capacity, "Exclusion_Reason"] = "MISSING_CAPACITY"
         return group
-
-    failure_position = last_valid_position
-
-    while failure_position > 0:
-        previous_position = failure_position - 1
-
-        if not bool(valid_capacity.iloc[previous_position]):
-            break
-
-        if not bool(below_threshold.iloc[previous_position]):
-            break
-
-        failure_position = previous_position
 
     failure_cycle = int(group.iloc[failure_position]["Cycle_Index"])
     group["Failure_Cycle"] = failure_cycle
@@ -239,8 +360,15 @@ def assign_rul_to_battery(group: pd.DataFrame) -> pd.DataFrame:
         return group
 
     group["RUL"] = failure_cycle - group["Cycle_Index"]
+    group["RUL"] = group["RUL"].clip(lower=0)
 
-    temporary_crossing = below_threshold & group["Cycle_Index"].lt(failure_cycle)
+    # Any below-threshold point before the accepted failure is treated as a
+    # temporary crossing and excluded from model training.
+    temporary_crossing = (
+        below_threshold
+        & group["Cycle_Index"].lt(failure_cycle)
+    )
+
     post_eol = group["Cycle_Index"].gt(failure_cycle)
     pre_eol_or_failure = group["Cycle_Index"].le(failure_cycle)
 
@@ -248,19 +376,19 @@ def assign_rul_to_battery(group: pd.DataFrame) -> pd.DataFrame:
         "TEMPORARY_THRESHOLD_CROSSING"
     )
     group.loc[post_eol, "Exclusion_Reason"] = "POST_EOL"
+    group.loc[~valid_capacity, "Exclusion_Reason"] = "MISSING_CAPACITY"
 
-    # Keep pre-EOL cycles and the first EOL cycle. Temporary crossings are
-    # excluded because they contradict a persistent degradation trajectory.
-    group["Model_Eligible"] = pre_eol_or_failure & ~temporary_crossing
-
-    # RUL must never be negative in the diagnostic table.
-    group["RUL"] = group["RUL"].clip(lower=0)
+    group["Model_Eligible"] = (
+        pre_eol_or_failure
+        & ~temporary_crossing
+        & valid_capacity
+    )
 
     return group
 
 
 def apply_rul_logic(all_df: pd.DataFrame) -> pd.DataFrame:
-    """Apply the battery-level RUL calculation to the full merged dataset."""
+    """Apply the battery-level RUL calculation to the merged dataset."""
     processed_groups = [
         assign_rul_to_battery(group)
         for _, group in all_df.groupby("Battery_ID", sort=False)
@@ -272,16 +400,17 @@ def apply_rul_logic(all_df: pd.DataFrame) -> pd.DataFrame:
 
     complete_model_features = result[MODEL_FEATURE_COLUMNS].notna().all(axis=1)
 
-    missing_features_mask = (
-        result["Model_Eligible"]
-        & ~complete_model_features
-        & result["Exclusion_Reason"].eq("")
-    )
+    missing_features_mask = result["Model_Eligible"] & ~complete_model_features
 
-    result.loc[missing_features_mask, "Exclusion_Reason"] = (
-        "MISSING_EXTRACTED_FEATURES"
-    )
-    result.loc[missing_features_mask, "Model_Eligible"] = False
+    result.loc[
+        missing_features_mask,
+        "Exclusion_Reason",
+    ] = "MISSING_EXTRACTED_FEATURES"
+
+    result.loc[
+        missing_features_mask,
+        "Model_Eligible",
+    ] = False
 
     return result
 
@@ -318,6 +447,9 @@ def build_model_table(all_df: pd.DataFrame) -> pd.DataFrame:
     return model_df
 
 
+# ---------------------------------------------------------------------------
+# Reporting and database output
+# ---------------------------------------------------------------------------
 def print_quality_summary(all_df: pd.DataFrame, model_df: pd.DataFrame) -> None:
     """Print diagnostics before writing the output tables."""
     print("\nQuality summary")
@@ -356,7 +488,11 @@ def print_quality_summary(all_df: pd.DataFrame, model_df: pd.DataFrame) -> None:
     print(battery_summary.to_string(index=False))
 
 
-def upload_tables(engine: Engine, all_df: pd.DataFrame, model_df: pd.DataFrame) -> None:
+def upload_tables(
+    engine: Engine,
+    all_df: pd.DataFrame,
+    model_df: pd.DataFrame,
+) -> None:
     """Replace both SQL output tables inside one database transaction."""
     with engine.begin() as connection:
         all_df.to_sql(
@@ -408,7 +544,7 @@ def extract_features() -> None:
                 "active-discharge feature row."
             )
 
-        print("Step 4/5: Detecting persistent failure and calculating RUL...")
+        print("Step 4/5: Detecting confirmed failure and calculating RUL...")
         all_df = apply_rul_logic(all_df)
         model_df = build_model_table(all_df)
         print_quality_summary(all_df, model_df)
