@@ -1,0 +1,1 @@
+SELECT b.Nominal_Capacity FROM BATTERIES b
