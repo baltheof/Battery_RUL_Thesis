@@ -20,7 +20,7 @@ import pandas as pd
 from db_connection import get_engine
 
 
-FAILURE_THRESHOLD_RATIO = 0.60
+FAILURE_THRESHOLD_RATIO = 0.75
 
 
 def extract_features():
@@ -243,3 +243,5 @@ def extract_features():
 
 if __name__ == "__main__":
     extract_features()
+
+    #    moving average
