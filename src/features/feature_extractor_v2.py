@@ -9,7 +9,7 @@ if SRC_DIR not in sys.path:
 
 from db_connection import get_engine
 
-# ── PARAMETERS ────────────────────────────────────────────────────────────────
+# ── PARAMETERS ───────────────────────────────────────────────────────────────
 MOVING_AVERAGE_WINDOW  = 5      # κύκλοι για εξομάλυνση
 FLAG_THRESHOLD         = 0.5    # κάτω από 50% του max → impedance cycle
 FAILURE_THRESHOLD_SOH  = 0.70   # κάτω από 70% SoH → failure
