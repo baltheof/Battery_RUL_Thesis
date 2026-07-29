@@ -29,8 +29,7 @@ def extract_features_v2():
             tc.Cycle_ID,
             tc.Battery_ID,
             tc.Cycle_Index,
-            tc.Capacity_Ah,
-            b.Nominal_Capacity
+            tc.Capacity_Ah
         FROM TEST_CYCLES AS tc
         INNER JOIN BATTERIES AS b
             ON tc.Battery_ID = b.Battery_ID
@@ -61,33 +60,51 @@ def extract_features_v2():
             .mean()
         )
 
-        # STEP 1.2: SoH = Capacity_MA / max(Capacity_MA)
-         # Max από τους πρώτους 10 κύκλους για να αποφύγουμε
-        # SoH > 1.0 λόγω Moving Average lag
-        max_ma = group["Capacity_MA"].head(5).max()
-        group["SoH"] = (group["Capacity_MA"] / max_ma).clip(upper=1.0)
+        # Median των πρώτων 5 φυσιολογικών κύκλων
+        # Ανθεκτικό σε ακραίες τιμές
+        group_normal = group[group["Capacity_Ah"] > 0.5].copy()
+        nominal = group_normal["Capacity_Ah"].head(5).median()
+        group["Nominal"] = nominal  # ← αποθηκεύουμε για έλεγχο
 
-        # STEP 1.3: Flag — 0 για impedance cycles, 1 για φυσιολογικούς
+        # STEP 1.3: SoH με clip ώστε να μην ξεπερνά 1.0
+        group["SoH"] = (group["Capacity_MA"] / nominal).clip(upper=1.0)
+
+        # STEP 1.4: Flag — 0 για impedance cycles, 1 για φυσιολογικούς
         group["Flag"] = (group["SoH"] >= FLAG_THRESHOLD).astype(int)
 
-        # STEP 1.4: RUL — μόνο σε κύκλους με Flag=1
+        # STEP 1.5: RUL — μόνο σε κύκλους με Flag=1
         group_valid = group[group["Flag"] == 1].copy()
 
         # Failure = FIRST CYCLE WITH SoH < FAILURE_THRESHOLD_SOH
         failed = group_valid[group_valid["SoH"] < FAILURE_THRESHOLD_SOH]
 
-        if failed.empty or failed["Cycle_Index"].iloc[0] <= 5:
+        # Failure μόνο αφού η μπαταρία έχει φτάσει σε υγιές επίπεδο (SoH > 0.85)
+        healthy_cycles = group_valid[group_valid["SoH"] > 0.85]
+        if healthy_cycles.empty:
+            group["RUL"] = np.nan
+            failure_cycle = "N/A"
+            rul_max = "N/A"
+        elif failed.empty:
             group["RUL"] = np.nan
             failure_cycle = "N/A"
             rul_max = "N/A"
         else:
-            failure_cycle = failed["Cycle_Index"].iloc[0]
-            group["RUL"] = (failure_cycle - group["Cycle_Index"]).clip(lower=0)
-            group.loc[group["Flag"] == 0, "RUL"] = np.nan
-            rul_max = int(group["RUL"].max())
+            # Failure πρέπει να είναι ΜΕΤΑ από υγιείς κύκλους
+            first_healthy = healthy_cycles["Cycle_Index"].iloc[0]
+            failed_after_healthy = failed[failed["Cycle_Index"] > first_healthy]
+            
+            if failed_after_healthy.empty:
+                group["RUL"] = np.nan
+                failure_cycle = "N/A"
+                rul_max = "N/A"
+            else:
+                failure_cycle = failed_after_healthy["Cycle_Index"].iloc[0]
+                group["RUL"] = (failure_cycle - group["Cycle_Index"]).clip(lower=0)
+                group.loc[group["Flag"] == 0, "RUL"] = np.nan
+                rul_max = int(group["RUL"].max())
 
-        print(f"{battery_id:>10} {len(group_valid):>8} {max_ma:>8.3f} "
-              f"{max_ma * FAILURE_THRESHOLD_SOH:>10.3f} "
+        print(f"{battery_id:>10} {len(group_valid):>8} {nominal:>8.3f} "
+              f"{nominal * FAILURE_THRESHOLD_SOH:>10.3f} "
               f"{len(group_valid):>7} {str(failure_cycle):>9} {str(rul_max):>9}")
 
         results.append(group)
@@ -152,7 +169,7 @@ def extract_features_v2():
 
     output_df = output_df[[
         "Cycle_ID", "Battery_ID", "Cycle_Index",
-        "Capacity_Ah", "Capacity_MA", "SoH", "Flag",
+        "Capacity_Ah", "Capacity_MA", "Nominal", "SoH", "Flag",
         "Discharge_Time", "Temp_Mean", "Temp_Max",
         "Voltage_Min", "Voltage_Mean", "Current_Mean",
         "RUL"
@@ -177,3 +194,7 @@ def extract_features_v2():
 
 if __name__ == "__main__":
     extract_features_v2()
+
+
+
+    # ερωτηση μπαταρια 41 τι να την κανουμε
