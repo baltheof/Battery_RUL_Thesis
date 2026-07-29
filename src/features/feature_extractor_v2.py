@@ -60,26 +60,32 @@ def extract_features_v2():
             .mean()
         )
 
-        # Median των πρώτων 5 φυσιολογικών κύκλων
-        # Ανθεκτικό σε ακραίες τιμές
+        # STEP 1.2: Nominal με IQR φίλτρο
         group_normal = group[group["Capacity_Ah"] > 0.5].copy()
-        nominal = group_normal["Capacity_Ah"].head(5).median()
-        group["Nominal"] = nominal  # ← αποθηκεύουμε για έλεγχο
+        first_10 = group_normal["Capacity_Ah"].head(10)
+        q75 = first_10.quantile(0.75)
+        q25 = first_10.quantile(0.25)
+        iqr = q75 - q25
+        filtered = first_10[first_10 <= q75 + 1.5 * iqr]
+        nominal = filtered.max()
+        group["Nominal"] = nominal
 
         # STEP 1.3: SoH με clip ώστε να μην ξεπερνά 1.0
         group["SoH"] = (group["Capacity_MA"] / nominal).clip(upper=1.0)
 
-        # STEP 1.4: Flag — 0 για impedance cycles, 1 για φυσιολογικούς
+        # STEP 1.4: Flag
         group["Flag"] = (group["SoH"] >= FLAG_THRESHOLD).astype(int)
 
-        # STEP 1.5: RUL — μόνο σε κύκλους με Flag=1
+        # STEP 1.5: RUL
         group_valid = group[group["Flag"] == 1].copy()
 
-        # Failure = FIRST CYCLE WITH SoH < FAILURE_THRESHOLD_SOH
-        failed = group_valid[group_valid["SoH"] < FAILURE_THRESHOLD_SOH]
+        # Failure βάσει πρωτογενούς Capacity_Ah (όχι MA)
+        # ώστε να μην χάνουμε μπαταρίες λόγω εξομάλυνσης
+        failed = group_valid[
+            group_valid["Capacity_Ah"] < nominal * FAILURE_THRESHOLD_SOH
+        ]
+        healthy_cycles = group_valid[group_valid["SoH"] > 0.75]
 
-        # Failure μόνο αφού η μπαταρία έχει φτάσει σε υγιές επίπεδο (SoH > 0.85)
-        healthy_cycles = group_valid[group_valid["SoH"] > 0.85]
         if healthy_cycles.empty:
             group["RUL"] = np.nan
             failure_cycle = "N/A"
@@ -89,10 +95,9 @@ def extract_features_v2():
             failure_cycle = "N/A"
             rul_max = "N/A"
         else:
-            # Failure πρέπει να είναι ΜΕΤΑ από υγιείς κύκλους
             first_healthy = healthy_cycles["Cycle_Index"].iloc[0]
             failed_after_healthy = failed[failed["Cycle_Index"] > first_healthy]
-            
+
             if failed_after_healthy.empty:
                 group["RUL"] = np.nan
                 failure_cycle = "N/A"
