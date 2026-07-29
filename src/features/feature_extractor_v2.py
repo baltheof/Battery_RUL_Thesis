@@ -62,9 +62,10 @@ def extract_features_v2():
         )
 
         # STEP 1.2: SoH = Capacity_MA / max(Capacity_MA)
-        # WE USE THE MAX OF THE FIRST 5 TO AVOID FIRST WEIRD CYCLE 
+         # Max από τους πρώτους 10 κύκλους για να αποφύγουμε
+        # SoH > 1.0 λόγω Moving Average lag
         max_ma = group["Capacity_MA"].head(5).max()
-        group["SoH"] = group["Capacity_MA"] / max_ma
+        group["SoH"] = (group["Capacity_MA"] / max_ma).clip(upper=1.0)
 
         # STEP 1.3: Flag — 0 για impedance cycles, 1 για φυσιολογικούς
         group["Flag"] = (group["SoH"] >= FLAG_THRESHOLD).astype(int)
@@ -75,7 +76,7 @@ def extract_features_v2():
         # Failure = FIRST CYCLE WITH SoH < FAILURE_THRESHOLD_SOH
         failed = group_valid[group_valid["SoH"] < FAILURE_THRESHOLD_SOH]
 
-        if failed.empty:
+        if failed.empty or failed["Cycle_Index"].iloc[0] <= 5:
             group["RUL"] = np.nan
             failure_cycle = "N/A"
             rul_max = "N/A"
