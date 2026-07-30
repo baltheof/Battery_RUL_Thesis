@@ -131,37 +131,83 @@ class CapacityPlotter:
         if event.inaxes != self.ax:
             return
 
-        # ΑΡΙΣΤΕΡΟ ΚΛΙΚ (1): Καρφίτσωμα ταμπελιού
+        if event.xdata is None or event.ydata is None:
+            return
+
+        # ── ΑΡΙΣΤΕΡΟ ΚΛΙΚ ────────────────────────────────────────────────────
         if event.button == 1:
-            lines_to_check = [self.active_line] if self.active_line else self.lines
-            
-            for line in lines_to_check:
-                cont, ind = line.contains(event)
-                if cont:
-                    idx = ind['ind'][0]
-                    x = line.get_xdata()[idx]
-                    y = line.get_ydata()[idx]
-                    color = line.get_color()
 
-                    self.ax.annotate(
-                        f"Cycle: {int(x)}\nCap: {y:.4f} Ah",
-                        xy=(x, y), xytext=(15, 15),
-                        textcoords="offset points",
-                        bbox=dict(boxstyle="round,pad=0.3", fc=color, ec="white", alpha=0.9),
-                        color="white", fontweight="bold",
-                        arrowprops=dict(arrowstyle="->", color="black")
-                    )
-                    self.fig.canvas.draw()
-                    break
-
-        # ΔΕΞΙ ΚΛΙΚ (3): Διαγραφή ταμπελιού με δεξί κλικ πάνω του
-        elif event.button == 3:
+            # Πρώτα έλεγξε αν κλικάρισες πάνω σε υπάρχον annotation
             for ann in list(self.ax.texts):
                 cont, _ = ann.contains(event)
                 if cont:
-                    ann.remove()
+                    # Φέρε το μπροστά αυξάνοντας το zorder
+                    max_z = max(a.get_zorder() for a in self.ax.texts)
+                    ann.set_zorder(max_z + 1)
                     self.fig.canvas.draw()
-                    break
+                    return
+
+            # Αν δεν κλικάρισες annotation → πρόσθεσε νέο
+            lines_to_check = [self.active_line] if self.active_line else self.lines
+
+            for line in lines_to_check:
+                xdata = line.get_xdata()
+                ydata = line.get_ydata()
+
+                if len(xdata) == 0:
+                    continue
+
+                distances = abs(xdata - event.xdata)
+                idx = distances.argmin()
+
+                if distances[idx] > 3:
+                    continue
+
+                x = xdata[idx]
+                y = ydata[idx]
+
+                # Έλεγχος αν υπάρχει ήδη annotation για αυτόν τον κύκλο
+                existing_cycles = []
+                for ann in self.ax.texts:
+                    try:
+                        ann_x = ann.xy[0]
+                        existing_cycles.append(int(ann_x))
+                    except Exception:
+                        continue
+
+                if int(x) in existing_cycles:
+                    # Κύκλος υπάρχει ήδη — μην προσθέσεις νέο
+                    return
+
+                color = line.get_color()
+                self.ax.annotate(
+                    f"Cycle: {int(x)}\nCap: {y:.4f} Ah",
+                    xy=(x, y), xytext=(15, 25),
+                    textcoords="offset points",
+                    bbox=dict(boxstyle="round,pad=0.3", fc=color,
+                              ec="white", alpha=0.9),
+                    color="white", fontweight="bold",
+                    arrowprops=dict(arrowstyle="->", color="black"),
+                    zorder=999
+                )
+                self.fig.canvas.draw()
+                break
+
+        # ── ΔΕΞΙ ΚΛΙΚ — ΔΙΑΓΡΑΦΗ ────────────────────────────────────────────
+        elif event.button == 3:
+            overlapping = []
+            for ann in list(self.ax.texts):
+                cont, _ = ann.contains(event)
+                if cont:
+                    overlapping.append(ann)
+
+            if len(overlapping) == 0:
+                return
+
+            # Διάγραψε το annotation με το υψηλότερο zorder
+            top = max(overlapping, key=lambda a: a.get_zorder())
+            top.remove()
+            self.fig.canvas.draw()
 
 if __name__ == "__main__":
     plotter = CapacityPlotter()
