@@ -10,9 +10,11 @@ if SRC_DIR not in sys.path:
 from db_connection import get_engine
 
 # ── PARAMETERS ───────────────────────────────────────────────────────────────
-MOVING_AVERAGE_WINDOW  = 5      # κύκλοι για εξομάλυνση
-FLAG_THRESHOLD         = 0.5    # κάτω από 50% του max → impedance cycle
-FAILURE_THRESHOLD_SOH  = 0.70   # κάτω από 70% SoH → failure
+MOVING_AVERAGE_WINDOW       = 5      # κύκλοι για εξομάλυνση
+FLAG_THRESHOLD              = 0.5    # κάτω από 50% του max → impedance cycle
+FAILURE_THRESHOLD_SOH       = 0.70   # κάτω από 70% SoH → failure
+RECOVERY_THRESHOLD_SOH      = 0.75   # πάνω από 75% → πραγματική ανάκαμψη
+RECOVERY_CONSECUTIVE_CYCLES = 3      # συνεχόμενοι κύκλοι για επιβεβαίωση ανάκαμψης
 
 
 def extract_features_v2():
@@ -78,25 +80,21 @@ def extract_features_v2():
 
         # STEP 1.5: RUL
         group_valid = group[group["Flag"] == 1].copy()
+        failure_threshold = nominal * FAILURE_THRESHOLD_SOH
 
-        # Failure βάσει πρωτογενούς Capacity_Ah (όχι MA)
-        # ώστε να μην χάνουμε μπαταρίες λόγω εξομάλυνσης
-        failed = group_valid[
-            group_valid["Capacity_Ah"] < nominal * FAILURE_THRESHOLD_SOH
-        ]
-        healthy_cycles = group_valid[group_valid["SoH"] > 0.75]
+        healthy_cycles = group_valid[group_valid["SoH"] > RECOVERY_THRESHOLD_SOH]
 
         if healthy_cycles.empty:
             group["RUL"] = np.nan
             failure_cycle = "N/A"
             rul_max = "N/A"
-        elif failed.empty:
-            group["RUL"] = np.nan
-            failure_cycle = "N/A"
-            rul_max = "N/A"
         else:
             first_healthy = healthy_cycles["Cycle_Index"].iloc[0]
-            failed_after_healthy = failed[failed["Cycle_Index"] > first_healthy]
+
+            failed_after_healthy = group_valid[
+                (group_valid["Cycle_Index"] > first_healthy) &
+                (group_valid["Capacity_Ah"] < failure_threshold)
+            ]
 
             if failed_after_healthy.empty:
                 group["RUL"] = np.nan
@@ -104,7 +102,9 @@ def extract_features_v2():
                 rul_max = "N/A"
             else:
                 failure_cycle = failed_after_healthy["Cycle_Index"].iloc[0]
-                group["RUL"] = (failure_cycle - group["Cycle_Index"]).clip(lower=0)
+                group["RUL"] = (
+                    failure_cycle - group["Cycle_Index"]
+                ).clip(lower=0)
                 group.loc[group["Flag"] == 0, "RUL"] = np.nan
                 rul_max = int(group["RUL"].max())
 
