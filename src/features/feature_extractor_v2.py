@@ -11,6 +11,8 @@ from db_connection import get_engine
 
 # ── PARAMETERS ───────────────────────────────────────────────────────────────
 MOVING_AVERAGE_WINDOW       = 5      # κύκλοι για εξομάλυνση
+CENSORED_MAX_FINAL_SOH      = 0.80   # censored μόνο αν SoH τελευταίου κύκλου < 0.80
+MIN_CENSORED_CYCLES         = 20     # ελάχιστοι valid κύκλοι για censored μπαταρία
 FLAG_THRESHOLD              = 0.5    # κάτω από 50% του max → impedance cycle
 FAILURE_THRESHOLD_SOH       = 0.70   # κάτω από 70% SoH → failure
 RECOVERY_THRESHOLD_SOH      = 0.75   # πάνω από 75% → πραγματική ανάκαμψη
@@ -73,22 +75,23 @@ def extract_features_v2():
         group["Nominal"] = nominal
 
         # STEP 1.3: SoH με clip ώστε να μην ξεπερνά 1.0
-        group["SoH"] = (group["Capacity_MA"] / nominal).clip(upper=1.0)
+        group["SoH"] = group["Capacity_MA"] / nominal
 
         # STEP 1.4: Flag
         group["Flag"] = (group["SoH"] >= FLAG_THRESHOLD).astype(int)
 
-        # STEP 1.5: RUL
+        # STEP 1.5: RUL (confirmed failure ή censored)
         group_valid = group[group["Flag"] == 1].copy()
         failure_threshold = nominal * FAILURE_THRESHOLD_SOH
 
+        group["Is_Censored"] = 0
+        group["RUL"] = np.nan
+        failure_cycle = "N/A"
+        rul_max = "N/A"
+
         healthy_cycles = group_valid[group_valid["SoH"] > RECOVERY_THRESHOLD_SOH]
 
-        if healthy_cycles.empty:
-            group["RUL"] = np.nan
-            failure_cycle = "N/A"
-            rul_max = "N/A"
-        else:
+        if not healthy_cycles.empty:
             first_healthy = healthy_cycles["Cycle_Index"].iloc[0]
 
             failed_after_healthy = group_valid[
@@ -96,16 +99,22 @@ def extract_features_v2():
                 (group_valid["Capacity_Ah"] < failure_threshold)
             ]
 
-            if failed_after_healthy.empty:
-                group["RUL"] = np.nan
-                failure_cycle = "N/A"
-                rul_max = "N/A"
-            else:
+            if not failed_after_healthy.empty:
+                # Confirmed failure
                 failure_cycle = failed_after_healthy["Cycle_Index"].iloc[0]
-                group["RUL"] = (
-                    failure_cycle - group["Cycle_Index"]
-                ).clip(lower=0)
-                group.loc[group["Flag"] == 0, "RUL"] = np.nan
+                group["RUL"] = (failure_cycle - group["Cycle_Index"]).clip(lower=0)
+
+            elif (len(group_valid) >= MIN_CENSORED_CYCLES and
+                  group_valid["SoH"].iloc[-1] < CENSORED_MAX_FINAL_SOH):
+                # Censored: RUL = κάτω όριο
+                last_cycle = group_valid["Cycle_Index"].max()
+                group["RUL"] = (last_cycle - group["Cycle_Index"]).clip(lower=0)
+                group["Is_Censored"] = 1
+                failure_cycle = "CENS"
+
+            group.loc[group["Flag"] == 0, "RUL"] = np.nan
+
+            if group["RUL"].notna().any():
                 rul_max = int(group["RUL"].max())
 
         print(f"{battery_id:>10} {len(group_valid):>8} {nominal:>8.3f} "
@@ -177,21 +186,26 @@ def extract_features_v2():
         "Capacity_Ah", "Capacity_MA", "Nominal", "SoH", "Flag",
         "Discharge_Time", "Temp_Mean", "Temp_Max",
         "Voltage_Min", "Voltage_Mean", "Current_Mean",
-        "RUL"
+        "RUL", "Is_Censored"
     ]].copy()
 
-    print(f"   Final dataset: {len(output_df)} rows, "
-          f"{output_df.shape[1]} columns.")
+    confirmed_df = output_df[output_df["Is_Censored"] == 0].copy()
+
+    print(f"   Confirmed: {len(confirmed_df)} rows, "
+          f"{confirmed_df['Battery_ID'].nunique()} batteries")
+    print(f"   Total (with censored): {len(output_df)} rows, "
+          f"{output_df['Battery_ID'].nunique()} batteries")
     print(f"   RUL range: {output_df['RUL'].min()} – "
           f"{output_df['RUL'].max()} cycles")
     print(f"   Batteries: {sorted(output_df['Battery_ID'].unique())}")
 
+    confirmed_df.to_sql(
+        "CYCLE_FEATURES", con=engine,
+        if_exists="replace", index=False, chunksize=200
+    )
     output_df.to_sql(
-        "CYCLE_FEATURES",
-        con=engine,
-        if_exists="replace",
-        index=False,
-        chunksize=200
+        "CYCLE_FEATURES_CENSORED", con=engine,
+        if_exists="replace", index=False, chunksize=200
     )
 
     print("\nFeature extraction v2 complete! CYCLE_FEATURES is ready.")
