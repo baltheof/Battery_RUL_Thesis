@@ -10,13 +10,14 @@ if SRC_DIR not in sys.path:
 from db_connection import get_engine
 
 # ── PARAMETERS ───────────────────────────────────────────────────────────────
+FAILURE_CONSECUTIVE_CYCLES  = 3      # συνεχόμενοι έγκυροι κύκλοι κάτω από το όριο
 MOVING_AVERAGE_WINDOW       = 5      # κύκλοι για εξομάλυνση
-CENSORED_MAX_FINAL_SOH      = 0.80   # censored μόνο αν SoH τελευταίου κύκλου < 0.80
+CENSORED_MAX_FINAL_SOH      = 0.82    # censored μόνο αν SoH τελευταίου κύκλου < 0.82
 MIN_CENSORED_CYCLES         = 20     # ελάχιστοι valid κύκλοι για censored μπαταρία
 FLAG_THRESHOLD              = 0.5    # κάτω από 50% του max → impedance cycle
 FAILURE_THRESHOLD_SOH       = 0.70   # κάτω από 70% SoH → failure
 RECOVERY_THRESHOLD_SOH      = 0.75   # πάνω από 75% → πραγματική ανάκαμψη
-RECOVERY_CONSECUTIVE_CYCLES = 3      # συνεχόμενοι κύκλοι για επιβεβαίωση ανάκαμψης
+
 
 
 def extract_features_v2():
@@ -50,7 +51,7 @@ def extract_features_v2():
     results = []
 
     print(f"\n── BATTERY SUMMARY ──")
-    print(f"{'Battery':>10} {'Cycles':>8} {'Max_MA':>8} "
+    print(f"{'Battery':>10} {'Cycles':>8} {'Nominal':>8} "
           f"{'Threshold':>10} {'Valid':>7} {'Failure':>9} {'RUL_max':>9}")
     print("-" * 65)
 
@@ -64,21 +65,21 @@ def extract_features_v2():
             .mean()
         )
 
-        # STEP 1.2: Nominal με IQR φίλτρο
+        # STEP 1.2: Nominal = max του κυλιόμενου median (5 κύκλοι)
+        # στους πρώτους 30 έγκυρους κύκλους
         group_normal = group[group["Capacity_Ah"] > 0.5].copy()
-        first_10 = group_normal["Capacity_Ah"].head(10)
-        q75 = first_10.quantile(0.75)
-        q25 = first_10.quantile(0.25)
-        iqr = q75 - q25
-        filtered = first_10[first_10 <= q75 + 1.5 * iqr]
-        nominal = filtered.max()
+        first_30 = group_normal["Capacity_Ah"].head(30)
+        smooth = first_30.rolling(window=5, center=True, min_periods=3).median()
+        nominal = smooth.max()
         group["Nominal"] = nominal
 
-        # STEP 1.3: SoH με clip ώστε να μην ξεπερνά 1.0
+        # STEP 1.3
         group["SoH"] = group["Capacity_MA"] / nominal
 
         # STEP 1.4: Flag
-        group["Flag"] = (group["SoH"] >= FLAG_THRESHOLD).astype(int)
+        group["Flag"] = (
+            (group["SoH"] >= FLAG_THRESHOLD) & (group["Capacity_Ah"] > 0.5)
+        ).astype(int)
 
         # STEP 1.5: RUL (confirmed failure ή censored)
         group_valid = group[group["Flag"] == 1].copy()
@@ -94,14 +95,20 @@ def extract_features_v2():
         if not healthy_cycles.empty:
             first_healthy = healthy_cycles["Cycle_Index"].iloc[0]
 
-            failed_after_healthy = group_valid[
+            below = (
                 (group_valid["Cycle_Index"] > first_healthy) &
                 (group_valid["Capacity_Ah"] < failure_threshold)
-            ]
+            ).astype(int)
 
-            if not failed_after_healthy.empty:
-                # Confirmed failure
-                failure_cycle = failed_after_healthy["Cycle_Index"].iloc[0]
+            run_end = np.flatnonzero(
+                (below.rolling(FAILURE_CONSECUTIVE_CYCLES).sum()
+                 == FAILURE_CONSECUTIVE_CYCLES).values
+            )
+
+            if len(run_end) > 0:
+                # Confirmed failure: αρχή της πρώτης τριάδας κύκλων κάτω από το όριο
+                start = run_end[0] - (FAILURE_CONSECUTIVE_CYCLES - 1)
+                failure_cycle = group_valid["Cycle_Index"].iloc[start]
                 group["RUL"] = (failure_cycle - group["Cycle_Index"]).clip(lower=0)
 
             elif (len(group_valid) >= MIN_CENSORED_CYCLES and
