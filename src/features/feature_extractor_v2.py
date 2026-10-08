@@ -10,7 +10,7 @@ if SRC_DIR not in sys.path:
 from db_connection import get_engine
 
 # ── PARAMETERS ───────────────────────────────────────────────────────────────
-FAILURE_CONSECUTIVE_CYCLES  = 3      # συνεχόμενοι έγκυροι κύκλοι κάτω από το όριο
+FAILURE_CONSECUTIVE_CYCLES  = 2    # συνεχόμενοι έγκυροι κύκλοι κάτω από το όριο
 MOVING_AVERAGE_WINDOW       = 5      # κύκλοι για εξομάλυνση
 CENSORED_MAX_FINAL_SOH      = 0.82    # censored μόνο αν SoH τελευταίου κύκλου < 0.82
 MIN_CENSORED_CYCLES         = 20     # ελάχιστοι valid κύκλοι για censored μπαταρία
