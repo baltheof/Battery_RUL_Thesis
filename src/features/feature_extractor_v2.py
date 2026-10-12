@@ -10,9 +10,9 @@ if SRC_DIR not in sys.path:
 from db_connection import get_engine
 
 # ── PARAMETERS ───────────────────────────────────────────────────────────────
-FAILURE_CONSECUTIVE_CYCLES  = 2    # συνεχόμενοι έγκυροι κύκλοι κάτω από το όριο
+FAILURE_CONSECUTIVE_CYCLES  = 2      # συνεχόμενοι έγκυροι κύκλοι κάτω από το όριο
 MOVING_AVERAGE_WINDOW       = 5      # κύκλοι για εξομάλυνση
-CENSORED_MAX_FINAL_SOH      = 0.82    # censored μόνο αν SoH τελευταίου κύκλου < 0.82
+CENSORED_MAX_FINAL_SOH      = 0.82   # censored μόνο αν SoH τελευταίου κύκλου < 0.82
 MIN_CENSORED_CYCLES         = 20     # ελάχιστοι valid κύκλοι για censored μπαταρία
 FLAG_THRESHOLD              = 0.5    # κάτω από 50% του max → impedance cycle
 FAILURE_THRESHOLD_SOH       = 0.70   # κάτω από 70% SoH → failure
@@ -65,7 +65,8 @@ def extract_features_v2():
             .mean()
         )
 
-        # STEP 1.2: Nominal = max του κυλιόμενου median (5 κύκλοι)
+        #───STEP 1.2: Nominal = max του κυλιόμενου median (5 κύκλοι)────────────────────
+
         # στους πρώτους 30 έγκυρους κύκλους
         group_normal = group[group["Capacity_Ah"] > 0.5].copy()
         first_30 = group_normal["Capacity_Ah"].head(30)
@@ -73,15 +74,15 @@ def extract_features_v2():
         nominal = smooth.max()
         group["Nominal"] = nominal
 
-        # STEP 1.3
+        #─── STEP 1.3 : SoH ───────────────────────────────────────────────────────────────────────────
         group["SoH"] = group["Capacity_MA"] / nominal
 
-        # STEP 1.4: Flag
+        #─── STEP 1.4: Flag ─────────────────────────────────────────────────────────────────────
         group["Flag"] = (
             (group["SoH"] >= FLAG_THRESHOLD) & (group["Capacity_Ah"] > 0.5)
         ).astype(int)
 
-        # STEP 1.5: RUL (confirmed failure ή censored)
+        #─── STEP 1.5: RUL (confirmed failure ή censored)─────────────────────────────────────────
         group_valid = group[group["Flag"] == 1].copy()
         failure_threshold = nominal * FAILURE_THRESHOLD_SOH
 
@@ -113,6 +114,7 @@ def extract_features_v2():
 
             elif (len(group_valid) >= MIN_CENSORED_CYCLES and
                   group_valid["SoH"].iloc[-1] < CENSORED_MAX_FINAL_SOH):
+                
                 # Censored: RUL = κάτω όριο
                 last_cycle = group_valid["Cycle_Index"].max()
                 group["RUL"] = (last_cycle - group["Cycle_Index"]).clip(lower=0)
@@ -160,7 +162,7 @@ def extract_features_v2():
 
     final_df["RUL"] = final_df["RUL"].astype(int)
 
-    # ── STEP 3: Extract features from MEASUREMENTS ────────────────────────────
+    # ── STEP 2: Extract features from MEASUREMENTS ────────────────────────────
     print("\nStep 3/4: Extracting features from MEASUREMENTS...")
 
     cycle_ids = final_df["Cycle_ID"].tolist()
@@ -183,7 +185,7 @@ def extract_features_v2():
     features_df = pd.read_sql(meas_query, engine)
     print(f"   Features extracted for {len(features_df)} cycles.")
 
-    # ── STEP 4: Merge and upload ───────────────────────────────────────────────
+    # ── STEP 3: Merge and upload ───────────────────────────────────────────────
     print("\nStep 4/4: Merging and uploading to CYCLE_FEATURES...")
 
     output_df = final_df.merge(features_df, on="Cycle_ID", how="inner")
@@ -221,7 +223,3 @@ def extract_features_v2():
 if __name__ == "__main__":
     extract_features_v2()
 
-
-
-    # ερωτηση μπαταρια 41 τι να την κανουμε
-    # να κρατσησουμε την πρωτη  πτωση ή λκαι μετα που ξαναανεβαινει πχ Β0033?
