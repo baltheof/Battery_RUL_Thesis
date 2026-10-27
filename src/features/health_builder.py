@@ -12,6 +12,7 @@ from db_connection import get_engine
 # ── PARAMETERS ───────────────────────────────────────────────────────────────-
 MIN_VALID_CYCLES = 10   # ελάχιστοι έγκυροι κύκλοι για να μπει μπαταρία
 MAX_HEALTH = 1.15   # κύκλοι πάνω από αυτό θεωρούνται ακραίες τιμές
+DROP_FIRST_CYCLE = True   # ο πρώτος κύκλος κάθε μπαταρίας δεν είναι αντιπροσωπευτικός
 
 
 def build_cycle_health():
@@ -42,6 +43,12 @@ def build_cycle_health():
     n_before = len(base_df)
     base_df = base_df[base_df["Health"] <= MAX_HEALTH].copy()
     print(f"   Removed {n_before - len(base_df)} cycles with Health > {MAX_HEALTH}.")
+
+    if DROP_FIRST_CYCLE:
+        n_before = len(base_df)
+        first_idx = base_df.groupby("Battery_ID")["Cycle_Index"].transform("min")
+        base_df = base_df[base_df["Cycle_Index"] != first_idx].copy()
+        print(f"   Removed {n_before - len(base_df)} first cycles.")
 
     # ── STEP 3: Features από MEASUREMENTS ────────────────────────────────────
     print("Step 2/3: Extracting features from MEASUREMENTS...")
