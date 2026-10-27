@@ -50,7 +50,7 @@ def build_cycle_health():
         base_df = base_df[base_df["Cycle_Index"] != first_idx].copy()
         print(f"   Removed {n_before - len(base_df)} first cycles.")
 
-    # ── STEP 3: Features από MEASUREMENTS ────────────────────────────────────
+    # ── STEP 3: Features από MEASUREMENTS ────────────────────────────────────-
     print("Step 2/3: Extracting features from MEASUREMENTS...")
     ids_str = ",".join(str(i) for i in base_df["Cycle_ID"].tolist())
     features_df = pd.read_sql(f"""
