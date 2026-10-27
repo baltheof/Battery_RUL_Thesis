@@ -15,6 +15,8 @@ SETS = {
                                       "Voltage_Min", "Voltage_Mean", "Current_Mean"],
     "M2d: all minus Discharge_Time": ["Cycle_Index", "Temp_Mean",
                                       "Voltage_Min", "Voltage_Mean", "Current_Mean"],
+    "M2e: no Current_Mean":          ["Cycle_Index", "Discharge_Time", "Temp_Mean",
+                                      "Voltage_Min", "Voltage_Mean"],
     "B: all + Capacity (circular)":  ["Capacity_Ah", "Cycle_Index", "Discharge_Time",
                                       "Temp_Mean", "Voltage_Min", "Voltage_Mean",
                                       "Current_Mean"],
@@ -51,6 +53,35 @@ def lobo(df, cols):
     return maes_lin.mean(), maes_mean.mean(), int((maes_lin < maes_mean).sum()), len(maes_lin)
 
 
+def group_of(i):
+    if i < -3.5:
+        return "A(-4A)"
+    if i > -1.2:
+        return "C(-1A)"
+    return "B(-2A)"
+
+
+def logo(df, cols):
+    d = df.copy()
+    avg_i = d.groupby("Battery_ID")["Current_Mean"].transform("mean")
+    span = d.groupby("Battery_ID")["Current_Mean"].transform(lambda s: s.max() - s.min())
+    d["Group"] = [group_of(a) if s < 1.0 else "D(mixed)" for a, s in zip(avg_i, span)]
+
+    out = {}
+    for g in sorted(d["Group"].unique()):
+        te, tr = d[d["Group"] == g], d[d["Group"] != g]
+        model = fit(tr[cols].values.astype(float), tr["Health"].values.astype(float))
+        maes, bases = [], []
+        for b in te["Battery_ID"].unique():
+            t = te[te["Battery_ID"] == b]
+            pred = predict(model, t[cols].values.astype(float))
+            y = t["Health"].values.astype(float)
+            maes.append(np.mean(np.abs(y - pred)))
+            bases.append(np.mean(np.abs(y - tr["Health"].mean())))
+        out[g] = (len(maes), np.mean(maes), np.mean(bases))
+    return out
+
+
 def main():
     engine = get_engine()
     if engine is None:
@@ -75,6 +106,12 @@ def main():
     print(f"{'intercept':>15}: {model[0][0]:+.4f}")
     for c, w in zip(cols, model[0][1:]):
         print(f"{c:>15}: {w:+.4f}")
+
+    print("\n── LEAVE-ONE-GROUP-OUT (by discharge current) ──")
+    for name in ["M1: Cycles", "M2c: all (no capacity)", "M2e: no Current_Mean"]:
+        print(f"\n{name}")
+        for g, (n, mae, base) in logo(df, SETS[name]).items():
+            print(f"  {g:>9} ({n:>2} batt)  MAE {mae:.4f}  baseline {base:.4f}")
 
 
 if __name__ == "__main__":
