@@ -13,6 +13,7 @@ class SoHPlotter:
     VIEW_Y_MIN = -0.05
     VIEW_Y_MAX = 1.10
     SCROLL_STEP = 0.10
+    
 
     def __init__(self):
         self.engine = get_engine()
