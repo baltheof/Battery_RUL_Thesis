@@ -22,6 +22,9 @@ SETS = {
                                       "Current_Mean"],
 }
 
+# Το μοντέλο που ελέγχεται μία-μία σε όλες τις μπαταρίες
+CHECK_MODEL = "M2e: no Current_Mean"
+
 
 def fit(X, y):
     mu = X.mean(axis=0)
@@ -82,6 +85,33 @@ def logo(df, cols):
     return out
 
 
+def summary_all(df, cols):
+    rows = []
+    for b in sorted(df["Battery_ID"].unique()):
+        te = df[df["Battery_ID"] == b].sort_values("Cycle_Index")
+        tr = df[df["Battery_ID"] != b]
+        model = fit(tr[cols].values.astype(float), tr["Health"].values.astype(float))
+        pred = predict(model, te[cols].values.astype(float))
+        y = te["Health"].values.astype(float)
+        err = pred - y
+        k = min(5, len(te))
+        rows.append({
+            "Battery": b,
+            "Cycles": len(te),
+            "MAE": np.mean(np.abs(err)),
+            "Bias": np.mean(err),
+            "Actual_end": np.median(y[-k:]),
+            "Pred_end": np.median(pred[-k:]),
+            "Err_end": np.median(err[-k:]),
+            "Baseline": np.mean(np.abs(y - tr["Health"].mean())),
+        })
+    res = pd.DataFrame(rows)
+    res["Win"] = np.where(res["MAE"] < res["Baseline"], "yes", "no")
+    print(f"\n── PER-BATTERY SUMMARY, {CHECK_MODEL}, leave-one-battery-out ──")
+    print("Bias > 0: overestimates health | Err_end: error over last 5 cycles")
+    print(res.round(3).to_string(index=False))
+
+
 def main():
     engine = get_engine()
     if engine is None:
@@ -112,6 +142,8 @@ def main():
         print(f"\n{name}")
         for g, (n, mae, base) in logo(df, SETS[name]).items():
             print(f"  {g:>9} ({n:>2} batt)  MAE {mae:.4f}  baseline {base:.4f}")
+
+    summary_all(df, SETS[CHECK_MODEL])
 
 
 if __name__ == "__main__":
