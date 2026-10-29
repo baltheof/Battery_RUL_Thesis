@@ -20,6 +20,7 @@ def run(df, label):
     batteries = sorted(df["Battery_ID"].unique())
     rows = []
     coefs = []
+    preds = []
 
     for b in batteries:
         test = df[df["Battery_ID"] == b]
@@ -40,6 +41,13 @@ def run(df, label):
             "MAE_mean": np.mean(np.abs(y_te - pred_mean)),
         })
         coefs.append(c)
+        preds.append(pd.DataFrame({
+            "Battery_ID": b,
+            "Cycle_Index": test["Cycle_Index"].values,
+            "Health_actual": y_te,
+            "Pred_linear": pred_lin,
+            "Pred_baseline": pred_mean,
+        }))
 
     res = pd.DataFrame(rows)
     coefs = np.array(coefs)
@@ -52,7 +60,7 @@ def run(df, label):
           f"{(res['MAE_linear'] < res['MAE_mean']).sum()} / {len(res)} batteries")
     print(f"a0 across folds: mean {coefs[:,0].mean():.4f}, std {coefs[:,0].std():.5f}")
     print(f"a1 across folds: mean {coefs[:,1].mean():.6f}, std {coefs[:,1].std():.7f}")
-    return res
+    return res, pd.concat(preds, ignore_index=True)
 
 
 def main():
@@ -62,10 +70,14 @@ def main():
 
     df = pd.read_sql("SELECT * FROM CYCLE_HEALTH", engine)
 
-    res_all = run(df, "ALL batteries (B0038 as is)")
+    res_all, preds_all = run(df, "ALL batteries (B0038 as is)")
 
     mask_b38 = (df["Battery_ID"] == "B0038") & (df["Cycle_Index"] <= 12)
-    res_no38 = run(df[~mask_b38], "B0038 cycles 2-12 removed")
+    res_no38, _ = run(df[~mask_b38], "B0038 cycles 2-12 removed")
+
+    preds_all.to_sql("HEALTH_PRED_LINEAR", con=engine,
+                     if_exists="replace", index=False, chunksize=200)
+    print("\nSaved predictions to HEALTH_PRED_LINEAR.")
 
     print("\n── MAE PER BATTERY (all batteries version) ──")
     print(res_all.round(4).to_string(index=False))
