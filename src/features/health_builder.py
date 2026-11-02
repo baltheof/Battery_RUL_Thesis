@@ -13,6 +13,7 @@ from db_connection import get_engine
 MIN_VALID_CYCLES = 10   # ελάχιστοι έγκυροι κύκλοι για να μπει μπαταρία
 MAX_HEALTH = 1.15   # κύκλοι πάνω από αυτό θεωρούνται ακραίες τιμές
 DROP_FIRST_CYCLE = True   # ο πρώτος κύκλος κάθε μπαταρίας δεν είναι αντιπροσωπευτικός
+MIN_HEALTH = 0.5    # κύκλοι κάτω από αυτό θεωρούνται βυθίσεις (μέτρηση, όχι φθορά)
 
 
 def build_cycle_health():
@@ -43,6 +44,10 @@ def build_cycle_health():
     n_before = len(base_df)
     base_df = base_df[base_df["Health"] <= MAX_HEALTH].copy()
     print(f"   Removed {n_before - len(base_df)} cycles with Health > {MAX_HEALTH}.")
+
+    n_before = len(base_df)
+    base_df = base_df[base_df["Health"] >= MIN_HEALTH].copy()
+    print(f"   Removed {n_before - len(base_df)} cycles with Health < {MIN_HEALTH}.")
 
     if DROP_FIRST_CYCLE:
         n_before = len(base_df)
