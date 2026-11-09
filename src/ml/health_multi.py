@@ -128,6 +128,15 @@ def lobo_predictions(df):
         for name, cols in SETS.items():
             model = fit(tr[cols].values.astype(float), tr["Health"].values.astype(float))
             out["Pred_" + name.split(":")[0]] = predict(model, te[cols].values.astype(float))
+
+        # Ridge για το σύνολο P του καθηγητή (alpha από εσωτερικό LOBO)
+        cols = SETS["P: professor (7 vars)"]
+        Xtr = tr[cols].values.astype(float)
+        ytr = tr["Health"].values.astype(float)
+        a = choose_alpha(Xtr, ytr, tr["Battery_ID"].values)
+        model = fit_ridge(Xtr, ytr, a)
+        out["Pred_P_ridge"] = predict(model, te[cols].values.astype(float))
+        out["Alpha_P"] = a
         parts.append(out)
     return pd.concat(parts, ignore_index=True)
 
@@ -227,6 +236,16 @@ def main():
     print("\n── STANDARDIZED WEIGHTS, M2c, all batteries ──")
     print(f"{'intercept':>15}: {model[0][0]:+.4f}")
     for c, w in zip(cols, model[0][1:]):
+        print(f"{c:>15}: {w:+.4f}")
+
+    cols = SETS["P: professor (7 vars)"]
+    Xp = df[cols].values.astype(float)
+    yp = df["Health"].values.astype(float)
+    a = choose_alpha(Xp, yp, df["Battery_ID"].values)
+    coef, _, _ = fit_ridge(Xp, yp, a)
+    print(f"\n── STANDARDIZED WEIGHTS, RIDGE, P (7 vars), alpha {a:.3g} ──")
+    print(f"{'intercept':>15}: {coef[0]:+.4f}")
+    for c, w in zip(cols, coef[1:]):
         print(f"{c:>15}: {w:+.4f}")
 
     print("\n── LEAVE-ONE-GROUP-OUT (by discharge current) ──")
