@@ -20,6 +20,10 @@ SETS = {
     "P: professor (7 vars)":         ["Cycle_Index", "Discharge_Time", "Voltage_Mean",
                                       "Voltage_Min", "Temp_Mean", "Temp_Max",
                                       "Current_Mean"],
+    "R: professor + relative":       ["Cycle_Index", "Discharge_Time", "Voltage_Mean",
+                                      "Voltage_Min", "Temp_Mean", "Temp_Max",
+                                      "Current_Mean", "dVoltage_Mean", "dVoltage_Min",
+                                      "dTemp_Mean"],
     "B: all + Capacity (circular)":  ["Capacity_Ah", "Cycle_Index", "Discharge_Time",
                                       "Temp_Mean", "Voltage_Min", "Voltage_Mean",
                                       "Current_Mean"],
@@ -87,6 +91,7 @@ def lobo(df, cols, method="ols"):
     for b in sorted(np.unique(g)):
         te = g == b
         tr = ~te
+        assert not set(g[te]) & set(g[tr]), "battery leakage between train and test"
         if method == "ridge":
             a = choose_alpha(X[tr], y[tr], g[tr])
             alphas.append(a)

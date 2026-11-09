@@ -14,6 +14,8 @@ MIN_VALID_CYCLES = 10   # ελάχιστοι έγκυροι κύκλοι για 
 MAX_HEALTH = 1.15   # κύκλοι πάνω από αυτό θεωρούνται ακραίες τιμές
 DROP_FIRST_CYCLE = True   # ο πρώτος κύκλος κάθε μπαταρίας δεν είναι αντιπροσωπευτικός
 MIN_HEALTH = 0.5    # κύκλοι κάτω από αυτό θεωρούνται βυθίσεις (μέτρηση, όχι φθορά)
+REF_CYCLES = 5      # first cycles of each battery used as reference for relative features
+RELATIVE_COLS = ["Voltage_Mean", "Voltage_Min", "Temp_Mean"]
 
 
 def build_cycle_health():
@@ -82,6 +84,12 @@ def build_cycle_health():
         "Discharge_Time", "Temp_Mean", "Temp_Max",
         "Voltage_Min", "Voltage_Mean", "Current_Mean"
     ]].copy()
+
+    # Relative features: change from the mean of each battery's first REF_CYCLES cycles
+    out = out.sort_values(["Battery_ID", "Cycle_Index"]).reset_index(drop=True)
+    for col in RELATIVE_COLS:
+        ref = out.groupby("Battery_ID")[col].transform(lambda s: s.head(REF_CYCLES).mean())
+        out["d" + col] = out[col] - ref
 
     # ── STEP 4: Αποθήκευση και σύνοψη ────────────────────────────────────────
     print("Step 3/3: Saving CYCLE_HEALTH...")
