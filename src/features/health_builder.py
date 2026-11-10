@@ -10,10 +10,10 @@ if SRC_DIR not in sys.path:
 from db_connection import get_engine
 
 # ── PARAMETERS ───────────────────────────────────────────────────────────────-
-MIN_VALID_CYCLES = 10   # ελάχιστοι έγκυροι κύκλοι για να μπει μπαταρία
-MAX_HEALTH = 1.15   # κύκλοι πάνω από αυτό θεωρούνται ακραίες τιμές
-DROP_FIRST_CYCLE = True   # ο πρώτος κύκλος κάθε μπαταρίας δεν είναι αντιπροσωπευτικός
-MIN_HEALTH = 0.5    # κύκλοι κάτω από αυτό θεωρούνται βυθίσεις (μέτρηση, όχι φθορά)
+MIN_VALID_CYCLES = 10   # minimum valid cycles for a battery to be included
+MAX_HEALTH = 1.15   # cycles above this are treated as outliers
+DROP_FIRST_CYCLE = True   # the first cycle of each battery is not representative
+MIN_HEALTH = 0.5    # cycles below this are measurement dips, not degradation
 REF_CYCLES = 5      # first cycles of each battery used as reference for relative features
 RELATIVE_COLS = ["Voltage_Mean", "Voltage_Min", "Temp_Mean"]
 
@@ -24,7 +24,7 @@ def build_cycle_health():
         print("Database connection failed.")
         return
 
-    # ── STEP 1: Έγκυροι κύκλοι όλων των μπαταριών ────────────────────────────
+    # ── STEP 1: Valid cycles of all batteries ─────────────────────────────────
     print("Step 1/3: Loading valid cycles from CYCLE_FEATURES_ALL...")
     base_df = pd.read_sql("""
         SELECT Cycle_ID, Battery_ID, Cycle_Index, Capacity_Ah, Nominal
@@ -40,7 +40,7 @@ def build_cycle_health():
     if len(excluded) > 0:
         print(f"   Excluded (< {MIN_VALID_CYCLES} valid cycles): {excluded.to_dict()}")
 
-    # ── STEP 2: Στόχος: ωμή χωρητικότητα / Nominal ───────────────────────────
+    # ── STEP 2: Target: raw capacity / Nominal ────────────────────────────────
     base_df["Health"] = base_df["Capacity_Ah"] / base_df["Nominal"]
 
     n_before = len(base_df)
@@ -57,7 +57,7 @@ def build_cycle_health():
         base_df = base_df[base_df["Cycle_Index"] != first_idx].copy()
         print(f"   Removed {n_before - len(base_df)} first cycles.")
 
-    # ── STEP 3: Features από MEASUREMENTS ────────────────────────────────────-
+    # ── STEP 3: Features from MEASUREMENTS ────────────────────────────────────
     print("Step 2/3: Extracting features from MEASUREMENTS...")
     ids_str = ",".join(str(i) for i in base_df["Cycle_ID"].tolist())
     features_df = pd.read_sql(f"""
@@ -91,7 +91,7 @@ def build_cycle_health():
         ref = out.groupby("Battery_ID")[col].transform(lambda s: s.head(REF_CYCLES).mean())
         out["d" + col] = out[col] - ref
 
-    # ── STEP 4: Αποθήκευση και σύνοψη ────────────────────────────────────────
+    # ── STEP 4: Save and summary ──────────────────────────────────────────────
     print("Step 3/3: Saving CYCLE_HEALTH...")
     out.to_sql("CYCLE_HEALTH", con=engine, if_exists="replace",
                index=False, chunksize=200)

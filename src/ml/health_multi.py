@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 from db_connection import get_engine
 
-# Υποσύνολα μεταβλητών (Temp_Max μόνο στο P: συσχέτιση 0.99 με Temp_Mean)
+# Feature subsets (Temp_Max only in P: correlation 0.99 with Temp_Mean)
 SETS = {
     "M1: Cycles":                    ["Cycle_Index"],
     "M2a: +Voltage_Mean":            ["Cycle_Index", "Voltage_Mean"],
@@ -29,10 +29,10 @@ SETS = {
                                       "Current_Mean"],
 }
 
-# Το μοντέλο που ελέγχεται μία-μία σε όλες τις μπαταρίες
+# Model checked battery by battery in the per-battery summary
 CHECK_MODEL = "M2e: no Current_Mean"
 
-# Τιμές alpha για το Ridge (ίδιες με τον καθηγητή)
+# Ridge alpha grid (same as the professor's)
 ALPHAS = np.logspace(-3, 3, 25)
 
 
@@ -56,13 +56,13 @@ def fit_ridge(X, y, alpha):
     sd[sd == 0] = 1.0
     Z = np.column_stack([np.ones(len(X)), (X - mu) / sd])
     P = alpha * np.eye(Z.shape[1])
-    P[0, 0] = 0.0                      # ο σταθερός όρος δεν τιμωρείται
+    P[0, 0] = 0.0                      # the intercept is not penalized
     coef = np.linalg.solve(Z.T @ Z + P, Z.T @ y)
     return coef, mu, sd
 
 
 def choose_alpha(X, y, g):
-    # Εσωτερικό leave-one-battery-out μόνο στις μπαταρίες εκπαίδευσης
+    # Inner leave-one-battery-out on the training batteries only
     best_a, best_s = ALPHAS[0], np.inf
     for a in ALPHAS:
         maes = []
@@ -134,7 +134,7 @@ def lobo_predictions(df):
             model = fit(tr[cols].values.astype(float), tr["Health"].values.astype(float))
             out["Pred_" + name.split(":")[0]] = predict(model, te[cols].values.astype(float))
 
-        # Ridge για το σύνολο P του καθηγητή (alpha από εσωτερικό LOBO)
+        # Ridge for the professor's set P (alpha from inner LOBO)
         cols = SETS["P: professor (7 vars)"]
         Xtr = tr[cols].values.astype(float)
         ytr = tr["Health"].values.astype(float)
