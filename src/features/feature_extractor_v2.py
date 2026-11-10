@@ -10,13 +10,13 @@ if SRC_DIR not in sys.path:
 from db_connection import get_engine
 
 # ── PARAMETERS ───────────────────────────────────────────────────────────────
-FAILURE_CONSECUTIVE_CYCLES  = 2      # συνεχόμενοι έγκυροι κύκλοι κάτω από το όριο
-MOVING_AVERAGE_WINDOW       = 5      # κύκλοι για εξομάλυνση
-CENSORED_MAX_FINAL_SOH      = 0.82   # censored μόνο αν SoH τελευταίου κύκλου < 0.82
-MIN_CENSORED_CYCLES         = 20     # ελάχιστοι valid κύκλοι για censored μπαταρία
-FLAG_THRESHOLD              = 0.5    # κάτω από 50% του max → impedance cycle
-FAILURE_THRESHOLD_SOH       = 0.70   # κάτω από 70% SoH → failure
-RECOVERY_THRESHOLD_SOH      = 0.75   # πάνω από 75% → πραγματική ανάκαμψη
+FAILURE_CONSECUTIVE_CYCLES  = 2      # consecutive valid cycles below the threshold
+MOVING_AVERAGE_WINDOW       = 5      # cycles used for smoothing
+CENSORED_MAX_FINAL_SOH      = 0.82   # censored only if last-cycle SoH < 0.82
+MIN_CENSORED_CYCLES         = 20     # minimum valid cycles for a censored battery
+FLAG_THRESHOLD              = 0.5    # below 50% of nominal -> impedance cycle
+FAILURE_THRESHOLD_SOH       = 0.70   # below 70% SoH -> failure
+RECOVERY_THRESHOLD_SOH      = 0.75   # above 75% -> real recovery
 
 
 
@@ -58,31 +58,30 @@ def extract_features_v2():
     for battery_id, group in cycles_df.groupby("Battery_ID"):
         group = group.copy().sort_values("Cycle_Index")
 
-        # STEP 1.1: Moving Average
+        # ── Step 2.1: Moving average of capacity ──
         group["Capacity_MA"] = (
             group["Capacity_Ah"]
             .rolling(window=MOVING_AVERAGE_WINDOW, min_periods=1)
             .mean()
         )
 
-        #───STEP 1.2: Nominal = max του κυλιόμενου median (5 κύκλοι)────────────────────
-
-        # στους πρώτους 30 έγκυρους κύκλους
+        # ── Step 2.2: Nominal = max of the rolling median (5 cycles) ──
+        # computed on raw capacity over the first 30 valid cycles
         group_normal = group[group["Capacity_Ah"] > 0.5].copy()
         first_30 = group_normal["Capacity_Ah"].head(30)
         smooth = first_30.rolling(window=5, center=True, min_periods=3).median()
         nominal = smooth.max()
         group["Nominal"] = nominal
 
-        #─── STEP 1.3 : SoH ───────────────────────────────────────────────────────────────────────────
+        # ── Step 2.3: SoH (smoothed capacity / nominal) ──
         group["SoH"] = group["Capacity_MA"] / nominal
 
-        #─── STEP 1.4: Flag ─────────────────────────────────────────────────────────────────────
+        # ── Step 2.4: Flag (1 = valid discharge cycle, 0 = impedance cycle) ──
         group["Flag"] = (
             (group["SoH"] >= FLAG_THRESHOLD) & (group["Capacity_Ah"] > 0.5)
         ).astype(int)
 
-        #─── STEP 1.5: RUL (confirmed failure ή censored)─────────────────────────────────────────
+        # ── Step 2.5: RUL (confirmed failure or censored) ──
         group_valid = group[group["Flag"] == 1].copy()
         failure_threshold = nominal * FAILURE_THRESHOLD_SOH
 
@@ -107,7 +106,8 @@ def extract_features_v2():
             )
 
             if len(run_end) > 0:
-                # Confirmed failure: αρχή της πρώτης τριάδας κύκλων κάτω από το όριο
+                # Confirmed failure: first cycle of the first run of
+                # FAILURE_CONSECUTIVE_CYCLES cycles below the threshold
                 start = run_end[0] - (FAILURE_CONSECUTIVE_CYCLES - 1)
                 failure_cycle = group_valid["Cycle_Index"].iloc[start]
                 group["RUL"] = (failure_cycle - group["Cycle_Index"]).clip(lower=0)
@@ -115,7 +115,7 @@ def extract_features_v2():
             elif (len(group_valid) >= MIN_CENSORED_CYCLES and
                   group_valid["SoH"].iloc[-1] < CENSORED_MAX_FINAL_SOH):
                 
-                # Censored: RUL = κάτω όριο
+                # Censored: RUL is a lower bound
                 last_cycle = group_valid["Cycle_Index"].max()
                 group["RUL"] = (last_cycle - group["Cycle_Index"]).clip(lower=0)
                 group["Is_Censored"] = 1
@@ -137,7 +137,7 @@ def extract_features_v2():
     # ── ALL BATTERIES TOGETHER ──────────────────────────────────────────
     final_df = pd.concat(results, ignore_index=True)
 
-    # Αποθηκεύουμε όλους τους κύκλους για έλεγχο -gia to 0
+    # Save all cycles (including Flag = 0) for inspection
     final_df.to_sql(
         "CYCLE_FEATURES_ALL",
         con=engine,
@@ -145,7 +145,7 @@ def extract_features_v2():
         index=False
 )
 
-    # WE KEEP CYCLES ONLY WITH Flag=1 AND KNOWN RUL
+    # Keep only valid cycles (Flag = 1) with known RUL
     before = len(final_df)
     final_df = final_df[
         (final_df["Flag"] == 1) &
@@ -185,7 +185,7 @@ def extract_features_v2():
     features_df = pd.read_sql(meas_query, engine)
     print(f"   Features extracted for {len(features_df)} cycles.")
 
-    # ── STEP 3: Merge and upload ───────────────────────────────────────────────
+    # ── STEP 4: Merge and upload ───────────────────────────────────────────────
     print("\nStep 4/4: Merging and uploading to CYCLE_FEATURES...")
 
     output_df = final_df.merge(features_df, on="Cycle_ID", how="inner")
