@@ -90,7 +90,7 @@ class HealthPlotter:
             title='BATTERIES', title_fontsize=9
         )
 
-        # Legend picker (μόνο για τις μπαταρίες, όχι για τη γραμμή του 0.70)
+        # Legend picker (batteries only, not the 0.70 threshold line)
         self.legend_map = {}
         for legline, legtext, line in zip(
             self.leg.get_lines(), self.leg.get_texts(), self.lines
@@ -178,7 +178,7 @@ class HealthPlotter:
         if event.xdata is None or event.ydata is None:
             return
 
-        # Αριστερό κλικ: pin annotation
+        # Left click: pin annotation
         if event.button == 1:
             for ann in list(self.ax.texts):
                 cont, _ = ann.contains(event)
@@ -222,7 +222,7 @@ class HealthPlotter:
                 self.fig.canvas.draw()
                 break
 
-        # Δεξί κλικ: διαγραφή annotation
+        # Right click: delete annotation
         elif event.button == 3:
             overlapping = [
                 ann for ann in list(self.ax.texts)
@@ -233,7 +233,7 @@ class HealthPlotter:
                 self.fig.canvas.draw()
 
     def on_scroll(self, event):
-        # Ο τροχός μετακινεί μόνο τον κάθετο άξονα
+        # Mouse wheel moves only the vertical axis
         if event.inaxes != self.ax:
             return
 

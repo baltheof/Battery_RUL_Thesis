@@ -8,19 +8,19 @@ from db_connection import get_engine
 from health_multi import SETS, pooled
  
 # ── PARAMETERS ───────────────────────────────────────────────────────────────
-FEATURES      = SETS["P: professor (7 vars)"]   # ίδιες μεταβλητές με τον καθηγητή
-HIDDEN        = (32, 16)                        # νευρώνες ανά κρυφό επίπεδο
-L2_ALPHA      = 1e-3                            # ποινή στα βάρη
+FEATURES      = SETS["P: professor (7 vars)"]   # same features as the professor
+HIDDEN        = (32, 16)                        # neurons per hidden layer
+L2_ALPHA      = 1e-3                            # weight penalty
 LEARNING_RATE = 1e-3                            # Adam
 BATCH_SIZE    = 200
 MAX_EPOCHS    = 2000
 PATIENCE      = 30                              # early stopping
-VAL_FRACTION  = 0.15                            # ποσοστό μπαταριών εκπαίδευσης για validation
+VAL_FRACTION  = 0.15                            # share of training batteries used for validation
 SEED          = 42
-REG_ALPHAS    = [1e-3, 1e-1, 1.0, 10.0]          # ποινές που δοκιμάζονται στην παλινδρόμηση
-N_SEEDS       = 3                               # δίκτυα που μέσος όρος τους δίνει την πρόβλεψη
+REG_ALPHAS    = [1e-3, 1e-1, 1.0, 10.0]         # penalties tested in regression
+N_SEEDS       = 3                               # networks averaged for the final prediction
  
-# Κλάσεις υγείας (όπως ο καθηγητής)
+# Health classes (as defined by the professor)
 CLASS_NAMES = ["Degraded (<=0.8)", "Moderate (0.8-0.9]", "Healthy (>0.9)"]
  
  
@@ -28,11 +28,11 @@ def health_class(h):
     return np.where(h <= 0.8, 0, np.where(h <= 0.9, 1, 2))
  
  
-# ── MLP σε NumPy ─────────────────────────────────────────────────────────────
+# ── MLP in NumPy ─────────────────────────────────────────────────────────────
 class MLP:
     def __init__(self, n_in, n_out, task, seed, alpha=L2_ALPHA):
-        self.task = task                        # "clf" ή "reg"
-        self.alpha = alpha                      # ποινή στα βάρη
+        self.task = task                        # "clf" or "reg"
+        self.alpha = alpha                      # weight penalty
         rng = np.random.default_rng(seed)
         sizes = [n_in, *HIDDEN, n_out]
         self.W = [rng.normal(0, np.sqrt(2.0 / a), (a, b)) for a, b in zip(sizes[:-1], sizes[1:])]
@@ -131,7 +131,7 @@ def run_lobo(df, task):
         te = g_all == b
         tr_batt = np.array(sorted(np.unique(g_all[~te])))
  
-        # Validation: ολόκληρες μπαταρίες από το train (όχι τυχαίοι κύκλοι)
+        # Validation: whole batteries from the training set (not random cycles)
         rng = np.random.default_rng(SEED + i)
         n_val = max(1, int(round(VAL_FRACTION * len(tr_batt))))
         val_batt = rng.choice(tr_batt, n_val, replace=False)
@@ -150,11 +150,11 @@ def run_lobo(df, task):
             preds[te] = net.output(Z[te]).argmax(axis=1)
             base[te] = np.bincount(y_all[~te], minlength=3).argmax()
         else:
-            # Κανονικοποίηση στόχου με μέσο και τυπική απόκλιση του train
+            # Standardize the target with the training mean and std
             y_mu, y_sd = y_all[tr].mean(), y_all[tr].std()
             y_z = (y_all - y_mu) / y_sd
 
-            # Επιλογή ποινής με βάση το σφάλμα στις μπαταρίες validation
+            # Choose the penalty by the error on the validation batteries
             best_a, best_v = REG_ALPHAS[0], np.inf
             for a in REG_ALPHAS:
                 net = MLP(len(FEATURES), 1, task, SEED + i, a).train(
@@ -164,7 +164,7 @@ def run_lobo(df, task):
                     best_a, best_v = a, v
             alphas.append(best_a)
 
-            # Μέσος όρος N_SEEDS δικτύων με την επιλεγμένη ποινή
+            # Average of N_SEEDS networks with the chosen penalty
             outs = []
             for s in range(N_SEEDS):
                 net = MLP(len(FEATURES), 1, task, SEED + i + 1000 * s, best_a).train(

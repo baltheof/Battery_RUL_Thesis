@@ -39,7 +39,7 @@ class CapacityPlotter:
         
         colors = sns.color_palette("husl", len(self.batteries))
         
-        # 1. Σχεδίαση γραμμών (Αρχικά χωρίς dots)
+        # 1. Draw lines (initially without markers)
         for i, battery in enumerate(self.batteries):
             b_df = self.df[self.df['Battery_ID'] == battery]
             line, = self.ax.plot(
@@ -47,20 +47,20 @@ class CapacityPlotter:
                 marker='', linestyle='-', linewidth=1.5, alpha=0.85, 
                 color=colors[i], label=battery
             )
-            # Αρχικό μεσαίο hitbox για όλες τις γραμμές (10 pixels)
+            # Initial medium hitbox for all lines (10 pixels)
             line.set_pickradius(10)
             self.lines.append(line)
 
-        # 2. Μορφοποίηση Γραφήματος
+        # 2. Chart formatting
         self.ax.set_title('CAPACITY DEGRADATION CURVES (Click Legend to Focus)', fontsize=14, fontweight='bold')
         self.ax.set_xlabel('Cycle Index', fontsize=12)
         self.ax.set_ylabel('Capacity [Ah]', fontsize=12)
         self.ax.grid(True, linestyle='--', alpha=0.5)
         
-        # 3. Το Υπόμνημα
+        # 3. Legend
         self.leg = self.ax.legend(bbox_to_anchor=(1.02, 1), loc='upper left', fontsize=10, ncol=2)
         
-        # 4. Σύνδεση των κλικ
+        # 4. Connect click events
         self.map_legend_to_line = {}
         for legline, legtext, origline in zip(self.leg.get_lines(), self.leg.get_texts(), self.lines):
             legline.set_picker(True)
@@ -72,7 +72,7 @@ class CapacityPlotter:
         self.fig.canvas.mpl_connect('pick_event', self.on_pick)
         self.fig.canvas.mpl_connect('button_press_event', self.on_click)
 
-        # 5. Δυναμικό Hover
+        # 5. Dynamic hover
         cursor = mplcursors.cursor(self.lines, hover=True)
         @cursor.connect("add")
         def on_hover(sel):
@@ -95,7 +95,7 @@ class CapacityPlotter:
         if selected_line is None: 
             return
 
-        # --- Ο ΑΠΟΛΥΤΟΣ ΚΑΘΑΡΙΣΜΟΣ TΩΝ PINS ---
+        # --- Clear all pins when switching battery ---
         if self.active_line != selected_line:
             while self.ax.texts:
                 self.ax.texts[-1].remove()
@@ -110,7 +110,7 @@ class CapacityPlotter:
                 line.set_marker('o')  
                 line.set_markersize(4)
                 line.set_zorder(10)
-                # ---> ΤΕΡΑΣΤΙΟ HITBOX ΓΙΑ ΕΥΚΟΛΟ HOVER (15 pixels) <---
+                # Large hitbox for easy hover (15 pixels)
                 line.set_pickradius(15) 
                 leg_text.set_fontweight('bold')
                 leg_text.set_alpha(1.0)
@@ -120,7 +120,7 @@ class CapacityPlotter:
                 line.set_linewidth(1.0)
                 line.set_marker('')   
                 line.set_zorder(1)
-                # ---> ΑΠΕΝΕΡΓΟΠΟΙΗΣΗ HITBOX ΣΤΙΣ ΑΧΝΕΣ ΓΡΑΜΜΕΣ (2 pixels) <---
+                # Minimal hitbox on faded lines (2 pixels)
                 line.set_pickradius(2) 
                 leg_text.set_fontweight('normal')
                 leg_text.set_alpha(0.3)
@@ -134,20 +134,20 @@ class CapacityPlotter:
         if event.xdata is None or event.ydata is None:
             return
 
-        # ── ΑΡΙΣΤΕΡΟ ΚΛΙΚ ────────────────────────────────────────────────────
+        # ── LEFT CLICK ───────────────────────────────────────────────────────
         if event.button == 1:
 
-            # Πρώτα έλεγξε αν κλικάρισες πάνω σε υπάρχον annotation
+            # First check whether an existing annotation was clicked
             for ann in list(self.ax.texts):
                 cont, _ = ann.contains(event)
                 if cont:
-                    # Φέρε το μπροστά αυξάνοντας το zorder
+                    # Bring it to the front by raising its zorder
                     max_z = max(a.get_zorder() for a in self.ax.texts)
                     ann.set_zorder(max_z + 1)
                     self.fig.canvas.draw()
                     return
 
-            # Αν δεν κλικάρισες annotation → πρόσθεσε νέο
+            # No annotation clicked -> add a new one
             lines_to_check = [self.active_line] if self.active_line else self.lines
 
             for line in lines_to_check:
@@ -166,7 +166,7 @@ class CapacityPlotter:
                 x = xdata[idx]
                 y = ydata[idx]
 
-                # Έλεγχος αν υπάρχει ήδη annotation για αυτόν τον κύκλο
+                # Check whether this cycle already has an annotation
                 existing_cycles = []
                 for ann in self.ax.texts:
                     try:
@@ -176,7 +176,7 @@ class CapacityPlotter:
                         continue
 
                 if int(x) in existing_cycles:
-                    # Κύκλος υπάρχει ήδη — μην προσθέσεις νέο
+                    # Cycle already annotated, do not add another
                     return
 
                 color = line.get_color()
@@ -193,7 +193,7 @@ class CapacityPlotter:
                 self.fig.canvas.draw()
                 break
 
-        # ── ΔΕΞΙ ΚΛΙΚ — ΔΙΑΓΡΑΦΗ ────────────────────────────────────────────
+        # ── RIGHT CLICK: DELETE ──────────────────────────────────────────────
         elif event.button == 3:
             overlapping = []
             for ann in list(self.ax.texts):
@@ -204,7 +204,7 @@ class CapacityPlotter:
             if len(overlapping) == 0:
                 return
 
-            # Διάγραψε το annotation με το υψηλότερο zorder
+            # Delete the annotation with the highest zorder
             top = max(overlapping, key=lambda a: a.get_zorder())
             top.remove()
             self.fig.canvas.draw()

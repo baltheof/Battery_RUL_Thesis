@@ -39,7 +39,7 @@ class SoHPlotter:
         self.colors = sns.color_palette("husl", len(self.batteries))
         self.active_line = None
 
-        # Ύψος παραθύρου και συνολικό εύρος που μπορεί να φτάσει το scroll
+        # View height and the full range the scroll can reach
         self.view_height = self.VIEW_Y_MAX - self.VIEW_Y_MIN
         self.y_top_limit = max(self.VIEW_Y_MAX, self.df['SoH'].max() + 0.05)
 
@@ -106,7 +106,7 @@ class SoHPlotter:
             0, 0.70,
             alpha=0.04, color='#C44E52'
         )
-        # Αρχική προβολή: κανονικά μέχρι το 1.10
+        # Initial view: up to 1.10
         self.ax_soh.set_ylim(self.VIEW_Y_MIN, self.VIEW_Y_MAX)
 
         # Flag formatting
@@ -129,7 +129,7 @@ class SoHPlotter:
             title='BATTERIES', title_fontsize=9
         )
 
-        # (CENS) δίπλα στις censored μπαταρίες
+        # Add (CENS) next to censored batteries
         for txt, is_cens in zip(self.leg.get_texts(), self.cens_flags):
             if is_cens:
                 txt.set_text(txt.get_text() + " (CENS)")
@@ -232,7 +232,7 @@ class SoHPlotter:
         if event.xdata is None or event.ydata is None:
             return
 
-        # Αριστερό κλικ: pin annotation
+        # Left click: pin annotation
         if event.button == 1:
             for ax in [self.ax_soh, self.ax_flag]:
                 for ann in list(ax.texts):
@@ -289,7 +289,7 @@ class SoHPlotter:
                     self.fig.canvas.draw()
                     break
 
-        # Δεξί κλικ: διαγραφή annotation
+        # Right click: delete annotation
         elif event.button == 3:
             for ax in [self.ax_soh, self.ax_flag]:
                 if event.inaxes == ax:
@@ -303,7 +303,7 @@ class SoHPlotter:
                     return
 
     def on_scroll(self, event):
-        # Ο τροχός μετακινεί μόνο τον κάθετο άξονα του SoH plot
+        # Mouse wheel moves only the vertical axis of the SoH plot
         if event.inaxes != self.ax_soh:
             return
 
