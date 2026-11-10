@@ -14,8 +14,6 @@ MIN_VALID_CYCLES = 10   # minimum valid cycles for a battery to be included
 MAX_HEALTH = 1.15   # cycles above this are treated as outliers
 DROP_FIRST_CYCLE = True   # the first cycle of each battery is not representative
 MIN_HEALTH = 0.5    # cycles below this are measurement dips, not degradation
-REF_CYCLES = 5      # first cycles of each battery used as reference for relative features
-RELATIVE_COLS = ["Voltage_Mean", "Voltage_Min", "Temp_Mean"]
 
 
 def build_cycle_health():
@@ -84,12 +82,6 @@ def build_cycle_health():
         "Discharge_Time", "Temp_Mean", "Temp_Max",
         "Voltage_Min", "Voltage_Mean", "Current_Mean"
     ]].copy()
-
-    # Relative features: change from the mean of each battery's first REF_CYCLES cycles
-    out = out.sort_values(["Battery_ID", "Cycle_Index"]).reset_index(drop=True)
-    for col in RELATIVE_COLS:
-        ref = out.groupby("Battery_ID")[col].transform(lambda s: s.head(REF_CYCLES).mean())
-        out["d" + col] = out[col] - ref
 
     # ── STEP 4: Save and summary ──────────────────────────────────────────────
     print("Step 3/3: Saving CYCLE_HEALTH...")

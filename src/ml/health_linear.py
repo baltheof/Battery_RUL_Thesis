@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 from db_connection import get_engine
 
+# Simple linear model: health predicted from cycle count only
 FEATURES = ["Cycle_Index"]
 
 
@@ -16,6 +17,7 @@ def fit_predict(X_train, y_train, X_test):
     return Xte @ coeffs, coeffs
 
 
+# Leave-one-battery-out: each battery is predicted by a model trained on the others
 def run(df, label):
     batteries = sorted(df["Battery_ID"].unique())
     rows = []
@@ -72,6 +74,7 @@ def main():
 
     res_all, preds_all = run(df, "ALL batteries (B0038 as is)")
 
+    # Sensitivity check: B0038 starts with abnormally low health in cycles 2-12
     mask_b38 = (df["Battery_ID"] == "B0038") & (df["Cycle_Index"] <= 12)
     res_no38, _ = run(df[~mask_b38], "B0038 cycles 2-12 removed")
 
